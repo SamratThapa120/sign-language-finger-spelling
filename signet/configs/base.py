@@ -1,8 +1,9 @@
 import numpy as np
 class Base:
     ROWS_PER_FRAME = 543
-    NUM_CLASSES  = 250
-    PAD = (-100.0, np.int64(-1))
+    MAX_WORD_LENGTH  = 45
+    NUM_CLASSES = 60
+    PAD = (-100.0, np.int64(-1))  # padding value. First is padding value for input sequence, and second for prediction sequence.
     NOSE=[
         1,2,98,327
     ]

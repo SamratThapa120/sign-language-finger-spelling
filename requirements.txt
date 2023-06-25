@@ -2,7 +2,7 @@
 pandas==1.1.5
 joblib==1.1.1
 tqdm==4.64.1
-scikit-learn==1.0.dev0
+scikit-learn==0.24.2
 pyarrow==6.0.1
 fastparquet==0.8.0
 plotly==5.15.0

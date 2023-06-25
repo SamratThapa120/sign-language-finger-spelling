@@ -52,7 +52,7 @@ def get_tfrec_dataset(tfrecords,CFG):
 
     print(ds.element_spec)
     if CFG.batch_size:
-        ds = ds.padded_batch(CFG.batch_size, padding_values=CFG.PAD, padded_shapes=([CFG.max_len,CFG.CHANNELS],[CFG.NUM_CLASSES]), drop_remainder=CFG.drop_remainder)
+        ds = ds.padded_batch(CFG.batch_size, padding_values=CFG.PAD, padded_shapes=([CFG.max_len,CFG.CHANNELS],[CFG.MAX_WORD_LENGTH]), drop_remainder=CFG.drop_remainder)
 
     ds = ds.prefetch(tf.data.experimental.AUTOTUNE)
         
