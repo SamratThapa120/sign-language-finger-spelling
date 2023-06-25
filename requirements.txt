@@ -1,0 +1,8 @@
+# Under Docker image: tensorflow/tensorflow:2.3.0rc2-gpu
+pandas==1.1.5
+joblib==1.1.1
+tqdm==4.64.1
+scikit-learn==1.0.dev0
+pyarrow==6.0.1
+fastparquet==0.8.0
+plotly==5.15.0
