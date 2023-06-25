@@ -1,105 +1,4 @@
 import tensorflow as tf
-from keras.layers.convolutional.base_depthwise_conv import DepthwiseConv
-
-class DepthwiseConv1D(DepthwiseConv):
-
-    def __init__(
-        self,
-        kernel_size,
-        strides=1,
-        padding="valid",
-        depth_multiplier=1,
-        data_format=None,
-        dilation_rate=1,
-        activation=None,
-        use_bias=True,
-        depthwise_initializer="glorot_uniform",
-        bias_initializer="zeros",
-        depthwise_regularizer=None,
-        bias_regularizer=None,
-        activity_regularizer=None,
-        depthwise_constraint=None,
-        bias_constraint=None,
-        **kwargs
-    ):
-        super().__init__(
-            1,
-            kernel_size=kernel_size,
-            strides=strides,
-            padding=padding,
-            depth_multiplier=depth_multiplier,
-            data_format=data_format,
-            dilation_rate=dilation_rate,
-            activation=activation,
-            use_bias=use_bias,
-            depthwise_initializer=depthwise_initializer,
-            bias_initializer=bias_initializer,
-            depthwise_regularizer=depthwise_regularizer,
-            bias_regularizer=bias_regularizer,
-            activity_regularizer=activity_regularizer,
-            depthwise_constraint=depthwise_constraint,
-            bias_constraint=bias_constraint,
-            **kwargs
-        )
-
-    def call(self, inputs):
-        if self.data_format == "channels_last":
-            strides = (1,) + self.strides * 2 + (1,)
-            spatial_start_dim = 1
-        else:
-            strides = (1, 1) + self.strides * 2
-            spatial_start_dim = 2
-        inputs = tf.expand_dims(inputs, spatial_start_dim)
-        depthwise_kernel = tf.expand_dims(self.depthwise_kernel, axis=0)
-        dilation_rate = (1,) + self.dilation_rate
-
-        outputs = tf.nn.depthwise_conv2d(
-            inputs,
-            depthwise_kernel,
-            strides=strides,
-            padding=self.padding.upper(),
-            dilations=dilation_rate,
-            data_format=conv_utils.convert_data_format(
-                self.data_format, ndim=4
-            ),
-        )
-
-        if self.use_bias:
-            outputs = tf.nn.bias_add(
-                outputs,
-                self.bias,
-                data_format=conv_utils.convert_data_format(
-                    self.data_format, ndim=4
-                ),
-            )
-
-        outputs = tf.squeeze(outputs, [spatial_start_dim])
-
-        if self.activation is not None:
-            return self.activation(outputs)
-
-        return outputs
-
-    @tf_utils.shape_type_conversion
-    def compute_output_shape(self, input_shape):
-        if self.data_format == "channels_first":
-            input_dim = input_shape[2]
-            out_filters = input_shape[1] * self.depth_multiplier
-        elif self.data_format == "channels_last":
-            input_dim = input_shape[1]
-            out_filters = input_shape[2] * self.depth_multiplier
-
-        input_dim = conv_utils.conv_output_length(
-            input_dim,
-            self.kernel_size[0],
-            self.padding,
-            self.strides[0],
-            self.dilation_rate[0],
-        )
-        if self.data_format == "channels_first":
-            return (input_shape[0], out_filters, input_dim)
-        elif self.data_format == "channels_last":
-            return (input_shape[0], input_dim, out_filters)
 
 class ECA(tf.keras.layers.Layer):
     def __init__(self, kernel_size=5, **kwargs):
@@ -258,7 +157,7 @@ def Conv1DBlock(channel_size,
     return apply
 
 
-def CNN1DFeatureExtractor(CFG):
+def Cnn1dMhsaFeatureExtractor(CFG):
     inp = tf.keras.Input((CFG.max_len,CFG.CHANNELS))
     x = tf.keras.layers.Masking(mask_value=CFG.PAD[0],input_shape=(CFG.max_len,CFG.CHANNELS))(inp)
     ksize = 17
@@ -287,7 +186,9 @@ def CNN1DFeatureExtractor(CFG):
         x = TransformerBlock(CFG.dim,expand=2)(x)
 
     x = tf.keras.layers.Dense(CFG.dim*2,activation=None,name='top_conv')(x)
-    x = tf.keras.layers.GlobalAveragePooling1D()(x)
+    # x = tf.keras.layers.GlobalAveragePooling1D()(x)
     x = LateDropout(0.8, start_step=CFG.dropout_step)(x)
     x = tf.keras.layers.Dense(CFG.NUM_CLASSES,name='classifier')(x)
+
+    
     return tf.keras.Model(inp, x)

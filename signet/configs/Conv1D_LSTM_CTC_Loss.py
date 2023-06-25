@@ -1,8 +1,9 @@
 from .base import Base
 class Conv1D_LSTM_CTC_Loss(Base):
+    
     #Strategy params
     device="GPU"
-
+    num_devices=1
 
     #feature extractor params
     dropout_step=0
@@ -10,9 +11,47 @@ class Conv1D_LSTM_CTC_Loss(Base):
     feature_dim=512
 
     #dataset params
+    char_to_idx = {" ":0,"!":1,"#":2,"$":3,"%":4,"&":5,"'":6,"(":7,")":8,"*":9,"+":10,",":11,"-":12,".":13,"\/":14,"0":15,"1":16,"2":17,"3":18,"4":19,"5":20,"6":21,"7":22,"8":23,"9":24,":":25,";":26,"=":27,"?":28,"@":29,"[":30,"_":31,"a":32,"b":33,"c":34,"d":35,"e":36,"f":37,"g":38,"h":39,"i":40,"j":41,"k":42,"l":43,"m":44,"n":45,"o":46,"p":47,"q":48,"r":49,"s":50,"t":51,"u":52,"v":53,"w":54,"x":55,"y":56,"z":57,"~":58}
+    idx_to_char = {v:k for k,v in char_to_idx.items()}
+    merge_repeated=True
     batch_size=64
-    max_len=64
+    max_len=384
     drop_remainder=False
     augment=False
     shuffle=False
     repeat=False
+
+    #training params
+    is_jit=True
+    summary=True
+    one_hot=False
+    n_splits = 5
+    save_output = True
+    output_dir = '../runs/conv1d_mhsa_ctcloss'
+    
+    seed = 42
+    verbose = 2 #0) silent 1) progress bar 2) one line per epoch
+    
+    replicas = num_devices
+    lr = 5e-4 * replicas
+    weight_decay = 0.1
+    lr_min = 1e-6
+    epoch = 300 
+    warmup = 0
+    batch_size = 64 * replicas
+    snapshot_epochs = []
+    swa_epochs = [] #list(range(epoch//2,epoch+1))
+    
+    fp16 = True
+    fgm = False
+    awp = True
+    awp_lambda = 0.2
+    awp_start_epoch = 15
+    dropout_start_epoch = 15
+    resume = 0
+    decay_type = 'cosine'
+    dim = 192
+    resume_path=None  
+    start_epoch=0  
+    blank_index=59
+    ctc_decoder = "greedy"

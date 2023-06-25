@@ -13,7 +13,13 @@ supp_df = pd.read_csv("../dataset/supplemental_metadata.csv")
 train_df = pd.read_csv("../dataset/train.csv")
 example =pd.read_parquet('../dataset/train_landmarks/1019715464.parquet')
 classes,counts = np.unique([x.split("_")[1] for x in example.columns[1:]],return_counts=True)
-COLUMNS_SEQUENCE=sorted(example.columns[1:],key=lambda x: x[2:])
+
+def sort_func(x):
+    p = x.split("_")[-1]
+    return "_".join(x.split("_")[1:-1])+ "{:04d}".format(int(p))
+
+COLUMNS_SEQUENCE=sorted(example.columns[1:],key=sort_func)
+
 ROWS_PER_FRAME = 543
 
 def load_relevant_data_subset(pq_path):
@@ -89,7 +95,7 @@ def process_tfrecord_file(tfrecord_name):
         print(f"Sign: {sign}")
     return parsed_dataset
 
-_ = Parallel(n_jobs=12)(
+_ = Parallel(n_jobs=18)(
     delayed(process_file)(os.path.join("../dataset",pth),seqid_to_label,LABEL_DICT)
     for pth in full_df.path.unique())
 
