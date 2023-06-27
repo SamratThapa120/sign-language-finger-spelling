@@ -37,7 +37,7 @@ def decode_tfrec(record_bytes):
     out['frame_len'] = tf.gather(out['shape'], 0) 
     return out
 
-def get_tfrec_dataset(tfrecords,CFG):
+def get_tfrec_dataset(tfrecords,CFG,shuffle):
     # Initialize dataset with TFRecords
     ds = tf.data.TFRecordDataset(tfrecords, num_parallel_reads=tf.data.AUTOTUNE, compression_type='GZIP')
     ds = ds.map(decode_tfrec, tf.data.AUTOTUNE)
@@ -47,7 +47,7 @@ def get_tfrec_dataset(tfrecords,CFG):
         ds = ds.repeat()
         
     if CFG.shuffle:
-        ds = ds.shuffle(CFG.shuffle)
+        ds = ds.shuffle(shuffle)
         options = tf.data.Options()
         options.experimental_deterministic = (False)
         ds = ds.with_options(options)
