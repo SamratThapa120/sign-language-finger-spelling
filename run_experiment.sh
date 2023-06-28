@@ -1,1 +1,1 @@
-CUDA_VISIBLE_DEVICES=5 python3 experiments/debug.py
+CUDA_VISIBLE_DEVICES=4 TF_CUDNN_CTC_LOSS=1 python3 experiments/debug.py

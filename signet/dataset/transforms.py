@@ -128,16 +128,16 @@ def resample(x, rate=(0.8,1.2)):
 
 
 def augment_fn(x, always=False, max_len=None):
-    if tf.random.uniform(())<0.8 or always:
-        x = resample(x, (0.5,1.5))
+    # if tf.random.uniform(())<0.8 or always:
+    #     x = resample(x, (0.5,1.5))
     if tf.random.uniform(())<0.5 or always:
         x = flip_lr(x)
-    if max_len is not None:
-        x = temporal_crop(x, max_len)
+    # if max_len is not None:
+    #     x = temporal_crop(x, max_len)
     if tf.random.uniform(())<0.75 or always:
         x = spatial_random_affine(x)
-    if tf.random.uniform(())<0.5 or always:
-        x = temporal_mask(x)
+    # if tf.random.uniform(())<0.5 or always:
+    #     x = temporal_mask(x)
     if tf.random.uniform(())<0.5 or always:
         x = spatial_mask(x)
     return x

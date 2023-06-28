@@ -10,10 +10,10 @@ def filter_nans_tf(x,landmarks):
     return x
 
 
-def preprocess(x,CFG):
+def preprocess(x,CFG,augment=True):
     coord = x['coordinates']
     coord = filter_nans_tf(coord,CFG.POINT_LANDMARKS)
-    if CFG.augment:
+    if CFG.augment and augment:
         coord = augment_fn(coord, max_len=CFG.max_len)
     coord = tf.ensure_shape(coord, (None,CFG.ROWS_PER_FRAME,3))
     if CFG.one_hot:
@@ -37,13 +37,13 @@ def decode_tfrec(record_bytes):
     out['frame_len'] = tf.gather(out['shape'], 0) 
     return out
 
-def get_tfrec_dataset(tfrecords,CFG,shuffle):
+def get_tfrec_dataset(tfrecords,CFG,shuffle,repeat=False,augment=True):
     # Initialize dataset with TFRecords
     ds = tf.data.TFRecordDataset(tfrecords, num_parallel_reads=tf.data.AUTOTUNE, compression_type='GZIP')
     ds = ds.map(decode_tfrec, tf.data.AUTOTUNE)
-    ds = ds.map(lambda x: preprocess(x, CFG), tf.data.AUTOTUNE)
+    ds = ds.map(lambda x: preprocess(x, CFG,augment), tf.data.AUTOTUNE)
 
-    if CFG.repeat: 
+    if repeat: 
         ds = ds.repeat()
         
     if CFG.shuffle:

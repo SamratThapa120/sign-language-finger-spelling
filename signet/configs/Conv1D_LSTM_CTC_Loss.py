@@ -18,9 +18,9 @@ class Conv1D_LSTM_CTC_Loss(Base):
     drop_remainder=False
     augment=False
     shuffle=False
-    repeat=False
 
     #training params
+    validation_prediction_save_ratio=0.1
     is_jit=True
     summary=True
     one_hot=False
@@ -38,6 +38,8 @@ class Conv1D_LSTM_CTC_Loss(Base):
     epoch = 300 
     warmup = 0
     batch_size = 64 * replicas
+    val_batch_size = 64
+
     snapshot_epochs = []
     swa_epochs = [] #list(range(epoch//2,epoch+1))
     
@@ -50,7 +52,7 @@ class Conv1D_LSTM_CTC_Loss(Base):
     decay_type = 'cosine'
     dim = 192
  
-    blank_index=59
+    blank_index=len(char_to_idx)
     ctc_decoder = "greedy"
 
     start_epoch=0  
