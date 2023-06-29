@@ -1,6 +1,7 @@
 import tensorflow as tf
 import json
 import gc 
+import os
 import numpy as np
 import pandas as pd
 import tensorflow as tf
@@ -18,9 +19,8 @@ from signet.losses.ctc import CTCLoss
 from signet.configs.Conv1D_LSTM_CTC_Loss import Conv1D_LSTM_CTC_Loss
 from signet.trainer.utils import ctc_decode
 from signet.trainer.callbacks import LevenshteinCallback
-
 from signet.losses.metrics import normalized_levenshtein_distance,word_accuracy
-import os
+from signet.dataset.preprocess import Preprocess
 
 def get_strategy(CFG: Conv1D_LSTM_CTC_Loss):
     if CFG.device == "GPU"  or CFG.device=="CPU":
@@ -88,7 +88,7 @@ def train_conv1d_mhsa_ctc_model(experiment_name,CFG,train_files, valid_files=Non
             metrics=[],
             steps_per_execution=steps_per_epoch,
         )
-
+    tf.profiler.experimental.start(os.path.join(CFG.output_dir,experiment_name,'log_data'))
     if CFG.summary:
         print()
         model.summary()
@@ -112,11 +112,14 @@ def train_conv1d_mhsa_ctc_model(experiment_name,CFG,train_files, valid_files=Non
     logger = tf.keras.callbacks.CSVLogger(os.path.join(CFG.output_dir,experiment_name,'logs.csv'))
     swa = SWA(os.path.join(CFG.output_dir,experiment_name), CFG.swa_epochs, strategy=strategy, train_ds=train_ds, valid_ds=valid_ds, valid_steps=-(num_valid//-CFG.batch_size))
     levenshtein_cb = LevenshteinCallback(valid_ds,model,CFG,experiment_name,validation_steps=-(num_valid//-CFG.batch_size))
+    # tb_callback = tf.keras.callbacks.TensorBoard(log_dir=os.path.join(CFG.output_dir,experiment_name,'log_data'),
+                                            #  profile_batch=(10,20))
     callbacks = []
     if CFG.save_output:
         callbacks.append(logger)
         callbacks.append(swa)
         callbacks.append(levenshtein_cb)  
+        # callbacks.append(tb_callback)  
 
     history = model.fit(
         train_ds,
@@ -127,7 +130,7 @@ def train_conv1d_mhsa_ctc_model(experiment_name,CFG,train_files, valid_files=Non
         verbose=CFG.verbose,
         validation_steps=-(num_valid//-CFG.batch_size)
     )
-
+    tf.profiler.experimental.stop()
     if CFG.save_output:
         model.load_weights(os.path.join(CFG.output_dir,experiment_name,'best_ckpt.h5'))
         results = evaluate(model,valid_ds,CFG,validation_steps=-(num_valid//-CFG.batch_size))
@@ -152,3 +155,38 @@ def evaluate(model,validation_dataset,CFG:Conv1D_LSTM_CTC_Loss,validation_steps)
         "targets":targets ,
         "predictions":predictions
     }
+
+
+# https://www.kaggle.com/code/hoyso48/1st-place-solution-inference?scriptVersionId=128386331&cellId=9
+class Cnn1dMhsaFeatureExtractorTFLITE(tf.Module):
+    """
+    TensorFlow Lite model that takes input tensors and applies:
+        – a preprocessing model
+        – the ISLR model 
+    """
+
+    def __init__(self, CFG,model):
+        """
+        Initializes the TFLiteModel with the specified preprocessing model and ISLR model.
+        """
+        super(Cnn1dMhsaFeatureExtractorTFLITE, self).__init__()
+
+        # Load the feature generation and main models
+        self.prep_inputs = Preprocess(CFG)
+        self.model   = model
+    
+    @tf.function(input_signature=[tf.TensorSpec(shape=[None, 543, 3], dtype=tf.float32, name='inputs')])
+    def __call__(self, inputs):
+        """
+        Applies the feature generation model and main model to the input tensors.
+
+        Args:
+            inputs: Input tensor with shape [batch_size, 543, 3].
+
+        Returns:
+            A dictionary with a single key 'outputs' and corresponding output tensor.
+        """
+        x = self.prep_inputs(tf.cast(inputs, dtype=tf.float32))
+        outputs = self.model(x)
+        
+        return {'outputs': outputs}

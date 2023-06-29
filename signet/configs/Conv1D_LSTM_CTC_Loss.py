@@ -35,7 +35,7 @@ class Conv1D_LSTM_CTC_Loss(Base):
     lr = 5e-4 * replicas
     weight_decay = 0.1
     lr_min = 1e-6
-    epoch = 300 
+    epoch = 1 
     warmup = 0
     batch_size = 64 * replicas
     val_batch_size = 64

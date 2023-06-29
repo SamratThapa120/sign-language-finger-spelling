@@ -8,3 +8,4 @@ fastparquet==2023.4.0
 plotly==5.15.0
 python-Levenshtein==0.21.1
 nltk==3.8.1
+tensorboard_plugin_profile==2.13.0

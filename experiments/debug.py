@@ -33,4 +33,4 @@ for fpth in ALL_FILENAMES:
 
 experiment_name="simple_exp"
 
-train_conv1d_mhsa_ctc_model(experiment_name,CFG,train_files, valid_files)
+train_conv1d_mhsa_ctc_model(experiment_name,CFG,train_files[:5000], valid_files[:1000])
