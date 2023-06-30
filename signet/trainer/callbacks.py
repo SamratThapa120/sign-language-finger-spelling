@@ -1,38 +1,42 @@
-import tensorflow as tf
-from signet.losses.metrics import normalized_levenshtein_distance,word_accuracy
-from signet.trainer.utils import ctc_decode
+import torch
+from signet.trainer.metrics import normalized_levenshtein_distance,word_accuracy
+from signet.trainer.utils import GreedyCTCDecoder
 import os
 import numpy as np
-class LevenshteinCallback(tf.keras.callbacks.Callback):
-    def __init__(self, validation_data,model,CFG,experiment_name,validation_steps):
-        super(LevenshteinCallback, self).__init__()
-        self.validation_data = validation_data
-        self.y_trues = [label for _, label in self.validation_data.unbatch().as_numpy_iterator()]
-
+from tqdm import tqdm
+class LevenshteinCallback:
+    def __init__(self, data_loader,model,CFG,experiment_name,criterion,device):
+        assert data_loader.batch_size==1, "Batch size must be one for inference to simulate real-world inference scenario"
+        self.data_loader = data_loader
         self.model = model
         self.CFG = CFG
         self.best_metric = -99
         self.experiment_name = experiment_name
-        self.spe = validation_steps
+        self.decoder = GreedyCTCDecoder(CFG.idx_to_char,CFG.blank_index)
+        self.device=device
+        self.criterion = criterion
         os.makedirs(os.path.join(CFG.output_dir,experiment_name,"weights"),exist_ok=True)
-        self.on_epoch_end(-1)
-    def on_epoch_end(self, epoch, logs=None):
-        y_preds = self.model.predict(self.validation_data,steps = self.spe)
+        self(-1)
+
+    def __call__(self, epoch):
+        self.model.eval()
         predictions = []
         targets = []
-        for true_seq,y_pred in zip(self.y_trues,y_preds):
-            pred_seq = ctc_decode(y_pred,self.CFG.blank_index,self.CFG.merge_repeated).numpy()
-            true_seq = "".join([self.CFG.idx_to_char[i] for i in true_seq[true_seq!=-1]])
-            pred_seq = "".join([self.CFG.idx_to_char[i] for i in pred_seq[pred_seq!=-1]])
-            predictions.append(pred_seq)
-            targets.append(true_seq)
+        valid_loss = []
+        with torch.no_grad():
+            for idx,(input_features, labels, inp_length, target_length) in tqdm(enumerate(self.data_loader),total=len(self.data_loader)):
+                    pred = self.model.module(input_features[:,:inp_length[0]].to(self.device)).detach().cpu()
+                    valid_loss.append(self.criterion(pred,labels,inp_length,target_length).item())
+                    gts = "".join([self.CFG.idx_to_char[i] for i in labels[0,:target_length[0]].numpy()])
+                    pred = self.decoder(pred[0])
+                    predictions.append(pred)
+                    targets.append(gts)
         nld =  normalized_levenshtein_distance(targets,predictions)
         wa = word_accuracy(targets,predictions)
-        print(f"Epoch: {epoch}, Norm distance: {nld}, word accuracy: {wa} ")
         if nld>= self.best_metric:
             self.best_metric = nld
-            fpath = os.path.join(self.CFG.output_dir,self.experiment_name,'best_ckpt.h5')
-            self.model.save_weights(fpath)
+            fpath = os.path.join(self.CFG.output_dir,self.experiment_name,'best_ckpt.pth')
+            # Save best model in fpath
             print("Saved best model!!")
             fpath = os.path.join(self.CFG.output_dir,self.experiment_name,"weights",f'epoch-{epoch}-examples.txt')
             with open(fpath,"w") as file:
@@ -40,5 +44,6 @@ class LevenshteinCallback(tf.keras.callbacks.Callback):
                     if np.random.rand()<self.CFG.validation_prediction_save_ratio:
                         file.write(f"{targ}\t\t{pred}\n")
         if epoch%self.CFG.save_frequency==0:
-            fpath = os.path.join(self.CFG.output_dir,self.experiment_name,"weights",f'epoch-{epoch}.h5')
-            self.model.save_weights(fpath)
+            fpath = os.path.join(self.CFG.output_dir,self.experiment_name,"weights",f'epoch-{epoch}.pth')
+
+        return nld,wa,np.mean(valid_loss)

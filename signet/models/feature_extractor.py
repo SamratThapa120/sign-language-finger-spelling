@@ -1,195 +1,199 @@
-import tensorflow as tf
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
 
-class ECA(tf.keras.layers.Layer):
-    def __init__(self, kernel_size=5, **kwargs):
-        super().__init__(**kwargs)
-        self.supports_masking = True
+class ChannelLinear(nn.Module):
+    def __init__(self,inp_dim,out_dim , bias=False):
+        super(ChannelLinear,self).__init__()
+        self.layer = nn.Linear(inp_dim,out_dim,bias=bias)
+    def forward(self,x):
+        return self.layer(torch.transpose(x,1,2)).transpose(1,2)
+
+class ECA(nn.Module):
+    def __init__(self, kernel_size=5):
+        super(ECA, self).__init__()
         self.kernel_size = kernel_size
-        self.conv = tf.keras.layers.Conv1D(1, kernel_size=kernel_size, strides=1, padding="same", use_bias=False)
+        self.conv = nn.Conv1d(1, 1, kernel_size=kernel_size, stride=1, padding=(kernel_size - 1) // 2, bias=False)
+        self.global_pool = nn.AdaptiveAvgPool1d(1)
 
-    def call(self, inputs, mask=None):
-        nn = tf.keras.layers.GlobalAveragePooling1D()(inputs, mask=mask)
-        nn = tf.expand_dims(nn, -1)
-        nn = self.conv(nn)
-        nn = tf.squeeze(nn, -1)
-        nn = tf.nn.sigmoid(nn)
-        nn = nn[:,None,:]
-        return inputs * nn
+    def forward(self, x):
+        # feature descriptor on the global spatial information
+        y = self.global_pool(x)
+        # Two different branches of ECA module
+        y = self.conv(y.transpose(-1, -2)).transpose(-1, -2)
 
-class LateDropout(tf.keras.layers.Layer):
-    def __init__(self, rate, noise_shape=None, start_step=0, **kwargs):
-        super().__init__(**kwargs)
-        self.supports_masking = True
-        self.rate = rate
-        self.start_step = start_step
-        self.dropout = tf.keras.layers.Dropout(rate, noise_shape=noise_shape)
-      
-    def build(self, input_shape):
-        super().build(input_shape)
-        agg = tf.VariableAggregation.ONLY_FIRST_REPLICA
-        self._train_counter = tf.Variable(0, dtype="int64", aggregation=agg, trainable=False)
+        # Multi-scale information fusion
+        y = torch.sigmoid(y)
 
-    def call(self, inputs, training=False):
-        x = tf.cond(self._train_counter < self.start_step, lambda:inputs, lambda:self.dropout(inputs, training=training))
-        if training:
-            self._train_counter.assign_add(1)
-        return x
+        return x * y.expand_as(x)
 
-class CausalDWConv1D(tf.keras.layers.Layer):
+
+
+class CausalDWConv1D(nn.Module):
     def __init__(self, 
+        in_channels=1, 
+        out_channels=1, 
         kernel_size=17,
         dilation_rate=1,
-        use_bias=False,
-        depthwise_initializer='glorot_uniform',
-        name='', **kwargs):
-        super().__init__(name=name,**kwargs)
-        self.causal_pad = tf.keras.layers.ZeroPadding1D((dilation_rate*(kernel_size-1),0),name=name + '_pad')
-        self.dw_conv = tf.keras.layers.DepthwiseConv1D(
+        use_bias=False):
+        super().__init__()
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.dilation_rate = dilation_rate
+        self.use_bias = use_bias
+
+        self.pad = nn.ConstantPad1d((dilation_rate*(kernel_size-1),0), 0)
+        self.dw_conv = nn.Conv1d(
+                            in_channels,
+                            in_channels*out_channels,
                             kernel_size,
-                            strides=1,
-                            dilation_rate=dilation_rate,
-                            padding='valid',
-                            use_bias=use_bias,
-                            depthwise_initializer=depthwise_initializer,
-                            name=name + '_dwconv')
-        self.supports_masking = True
-        
-    def call(self, inputs):
-        x = self.causal_pad(inputs)
+                            stride=1,
+                            dilation=dilation_rate,
+                            padding=0,
+                            bias=use_bias,
+                            groups=in_channels)  # Depthwise conv in PyTorch uses groups=in_channels
+
+    def forward(self, inputs):
+        x = self.pad(inputs)
         x = self.dw_conv(x)
         return x
-    
-class MultiHeadSelfAttention(tf.keras.layers.Layer):
-    def __init__(self, dim=256, num_heads=4, dropout=0, **kwargs):
-        super().__init__(**kwargs)
-        self.dim = dim
-        self.scale = self.dim ** -0.5
-        self.num_heads = num_heads
-        self.qkv = tf.keras.layers.Dense(3 * dim, use_bias=False)
-        self.drop1 = tf.keras.layers.Dropout(dropout)
-        self.proj = tf.keras.layers.Dense(dim, use_bias=False)
-        self.supports_masking = True
 
-    def call(self, inputs, mask=None):
-        qkv = self.qkv(inputs)
-        qkv = tf.keras.layers.Permute((2, 1, 3))(tf.keras.layers.Reshape((-1, self.num_heads, self.dim * 3 // self.num_heads))(qkv))
-        q, k, v = tf.split(qkv, [self.dim // self.num_heads] * 3, axis=-1)
-
-        attn = tf.matmul(q, k, transpose_b=True) * self.scale
-
-        if mask is not None:
-            mask = mask[:, None, None, :]
-
-        attn = tf.keras.layers.Softmax(axis=-1)(attn, mask=mask)
-        attn = self.drop1(attn)
-
-        x = attn @ v
-        x = tf.keras.layers.Reshape((-1, self.dim))(tf.keras.layers.Permute((2, 1, 3))(x))
-        x = self.proj(x)
-        return x
+class Swish(nn.Module):
+    def forward(self, x):
+        return x * torch.sigmoid(x)
 
 
-def TransformerBlock(dim=256, num_heads=4, expand=4, attn_dropout=0.2, drop_rate=0.2, activation='swish'):
-    def apply(inputs):
-        x = inputs
-        x = tf.keras.layers.BatchNormalization(momentum=0.95)(x)
-        x = MultiHeadSelfAttention(dim=dim,num_heads=num_heads,dropout=attn_dropout)(x)
-        x = tf.keras.layers.Dropout(drop_rate, noise_shape=(None,1,1))(x)
-        x = tf.keras.layers.Add()([inputs, x])
+class TransformerBlock(nn.Module):
+    def __init__(self,dim=256, num_heads=4, expand=4, attn_dropout=0.2, drop_rate=0.2, activation=Swish()):
+        super().__init__()
+        self.norm1 = nn.LayerNorm(dim)
+        self.attn = nn.MultiheadAttention(dim, num_heads, dropout=attn_dropout,batch_first=True)
+        self.dropout1 = nn.Dropout(drop_rate)
+        self.norm2 = nn.LayerNorm(dim)
+        self.linear1 = nn.Linear(dim, dim*expand, bias=False)
+        self.linear2 = nn.Linear(dim*expand, dim, bias=False)
+        self.dropout2 = nn.Dropout(drop_rate)
+        self.activation = activation
+
+    def forward(self, inputs):
+        inputs = torch.transpose(inputs,1,2)
+        x = self.norm1(inputs)
+
+        device = x.device
+        mask = torch.triu(torch.ones((x.shape[1], x.shape[1])), diagonal=1).bool().to(device)
+
+        x, _ = self.attn(x, x, x,attn_mask=mask)
+        x = self.dropout1(x)
+        x = x + inputs
         attn_out = x
 
-        x = tf.keras.layers.BatchNormalization(momentum=0.95)(x)
-        x = tf.keras.layers.Dense(dim*expand, use_bias=False, activation=activation)(x)
-        x = tf.keras.layers.Dense(dim, use_bias=False)(x)
-        x = tf.keras.layers.Dropout(drop_rate, noise_shape=(None,1,1))(x)
-        x = tf.keras.layers.Add()([attn_out, x])
-        return x
-    return apply
+        x = self.norm2(x)
+        x = self.activation(self.linear1(x))
+        x = self.linear2(x)
+        x = self.dropout2(x)
+        x = x + attn_out
+        return torch.transpose(x,1,2)
 
-def Conv1DBlock(channel_size,
-          kernel_size,
-          dilation_rate=1,
-          drop_rate=0.0,
-          expand_ratio=2,
-          se_ratio=0.25,
-          activation='swish',
-          name=None):
-    '''
-    efficient conv1d block, @hoyso48
-    '''
-    if name is None:
-        name = str(tf.keras.backend.get_uid("mbblock"))
-    # Expansion phase
-    def apply(inputs):
-        channels_in = tf.keras.backend.int_shape(inputs)[-1]
-        channels_expand = channels_in * expand_ratio
 
-        skip = inputs
+class Conv1DBlock(nn.Module):
+    def __init__(self, 
+                 channel_size,
+                 kernel_size,
+                 dilation_rate=1,
+                 drop_rate=0.0,
+                 expand_ratio=2,
+                 activation='relu'
+                ):
+        super(Conv1DBlock, self).__init__()
+        self.channel_size = channel_size
+        self.expand_ratio = expand_ratio
+        self.drop_rate = drop_rate
+        self.activation_func = F.relu if activation == 'relu' else Swish()
 
-        x = tf.keras.layers.Dense(
-            channels_expand,
-            use_bias=True,
-            activation=activation,
-            name=name + '_expand_conv')(inputs)
+        self.expand_conv = ChannelLinear(self.channel_size, self.channel_size*self.expand_ratio, bias=True)
+        self.dwconv = CausalDWConv1D(in_channels=self.channel_size*self.expand_ratio, kernel_size=kernel_size, dilation_rate=dilation_rate)
+        self.bn = nn.BatchNorm1d(num_features=self.channel_size*self.expand_ratio, momentum=0.95)
+        self.eca = ECA()
+        self.project_conv = ChannelLinear(self.channel_size*self.expand_ratio, self.channel_size, bias=True)
+        self.dropout = nn.Dropout(p=self.drop_rate)
 
-        # Depthwise Convolution
-        x = CausalDWConv1D(kernel_size,
-            dilation_rate=dilation_rate,
-            use_bias=False,
-            name=name + '_dwconv')(x)
+    def forward(self, x):
+        skip = x
+        x = self.expand_conv(x)
+        x = self.activation_func(x)
 
-        x = tf.keras.layers.BatchNormalization(momentum=0.95, name=name + '_bn')(x)
+        x = self.dwconv(x)
+        x = self.bn(x)
 
-        x  = ECA()(x)
+        x = self.eca(x)
 
-        x = tf.keras.layers.Dense(
-            channel_size,
-            use_bias=True,
-            name=name + '_project_conv')(x)
+        x = self.project_conv(x)
+        if self.drop_rate > 0:
+            x = self.dropout(x)
 
-        if drop_rate > 0:
-            x = tf.keras.layers.Dropout(drop_rate, noise_shape=(None,1,1), name=name + '_drop')(x)
-
-        if (channels_in == channel_size):
-            x = tf.keras.layers.add([x, skip], name=name + '_add')
+        if x.shape == skip.shape:
+            x += skip
         return x
 
-    return apply
 
+class Cnn1dMhsaFeatureExtractor(nn.Module):
+    def __init__(self, CFG):
+        super(Cnn1dMhsaFeatureExtractor, self).__init__()
+        
+        # self.masking = nn.ConstantPad1d((0, CFG.max_len - CFG.CHANNELS), CFG.PAD[0])
+        self.stem_conv = nn.Linear(CFG.CHANNELS, CFG.dim, bias=False)
+        self.stem_bn = nn.BatchNorm1d(CFG.dim, momentum=0.95)
+        self.dropout = nn.Dropout(0.8)
 
-def Cnn1dMhsaFeatureExtractor(CFG):
-    inp = tf.keras.Input((CFG.max_len,CFG.CHANNELS))
-    x = tf.keras.layers.Masking(mask_value=CFG.PAD[0],input_shape=(CFG.max_len,CFG.CHANNELS))(inp)
-    ksize = 17
-    x = tf.keras.layers.Dense(CFG.dim, use_bias=False,name='stem_conv')(x)
-    x = tf.keras.layers.BatchNormalization(momentum=0.95,name='stem_bn')(x)
+        self.blocks1 = nn.Sequential(
+            Conv1DBlock(CFG.dim, 17, drop_rate=0.2),
+            Conv1DBlock(CFG.dim, 17, drop_rate=0.2),
+            Conv1DBlock(CFG.dim, 17, drop_rate=0.2),
+            TransformerBlock(CFG.dim, expand=2)
+        )
 
-    x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-    x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-    x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-    x = TransformerBlock(CFG.dim,expand=2)(x)
+        self.blocks2 = nn.Sequential(
+            Conv1DBlock(CFG.dim, 17, drop_rate=0.2),
+            Conv1DBlock(CFG.dim, 17, drop_rate=0.2),
+            Conv1DBlock(CFG.dim, 17, drop_rate=0.2),
+            TransformerBlock(CFG.dim, expand=2)
+        )
 
-    x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-    x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-    x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-    x = TransformerBlock(CFG.dim,expand=2)(x)
+        if CFG.dim == 384:  # for the 4x sized model
+            self.blocks3 = nn.Sequential(
+                Conv1DBlock(CFG.dim, 17, drop_rate=0.2),
+                Conv1DBlock(CFG.dim, 17, drop_rate=0.2),
+                Conv1DBlock(CFG.dim, 17, drop_rate=0.2),
+                TransformerBlock(CFG.dim, expand=2)
+            )
+            self.blocks4 = nn.Sequential(
+                Conv1DBlock(CFG.dim, 17, drop_rate=0.2),
+                Conv1DBlock(CFG.dim, 17, drop_rate=0.2),
+                Conv1DBlock(CFG.dim, 17, drop_rate=0.2),
+                TransformerBlock(CFG.dim, expand=2)
+            )
+        else:
+            self.blocks3 = nn.Sequential()
+            self.blocks4 = nn.Sequential()
 
-    if CFG.dim == 384: #for the 4x sized model
-        x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-        x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-        x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-        x = TransformerBlock(CFG.dim,expand=2)(x)
+        self.top_conv = ChannelLinear(CFG.dim, CFG.dim * 2)
+        self.classifier = ChannelLinear(CFG.dim * 2, CFG.NUM_CLASSES)
 
-        x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-        x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-        x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-        x = TransformerBlock(CFG.dim,expand=2)(x)
+    def forward(self, x):
+        x = torch.transpose(self.stem_conv(x),1,2)
+        x = self.stem_bn(x)
 
-    x = tf.keras.layers.Dense(CFG.dim*2,activation=None,name='top_conv')(x)
-    # x = tf.keras.layers.GlobalAveragePooling1D()(x)
-    x = LateDropout(0.8, start_step=CFG.dropout_step)(x)
-    x = tf.keras.layers.Dense(CFG.NUM_CLASSES,name='classifier')(x)
+        x = self.blocks1(x)
+        x = self.blocks2(x)
+        x = self.blocks3(x)
+        x = self.blocks4(x)
 
-    
-    return tf.keras.Model(inp, x)
+        x = self.top_conv(x)
+        x = self.dropout(x)
+        x = self.classifier(x)
+
+        return torch.transpose(x,1,2)
+
 
