@@ -15,7 +15,7 @@ from torchcontrib.optim import SWA
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
-from signet.trainer.utils import CTCLossBatchFirst
+from signet.trainer.utils import CTCLossBatchFirst,get_logger
 from tqdm import tqdm
 
 def train_conv1d_mhsa_ctc_model(rank,world_size, experiment_name, data_root,train_data, valid_data):
@@ -51,9 +51,10 @@ def train_conv1d_mhsa_ctc_model(rank,world_size, experiment_name, data_root,trai
 
     if rank == 0:
         validation_callback = LevenshteinCallback(valid_loader,model,CFG,experiment_name,criterion,device)
-    
+        logger = get_logger(os.path.join(CFG.output_dir,experiment_name,'logs.txt'))
+        logger.info("Starting training....")
     for epoch in range(CFG.epoch):
-        print(f"Epoch [{epoch}/CFG.epoch]")
+        print(f"Epoch [{epoch}/{CFG.epoch}]")
         train_loss = 0
         for idx, (input_features, labels, inp_length, target_length) in tqdm(enumerate(train_loader),total=len(train_loader),disable=rank!=0):
             input_features, labels = input_features.to(device), labels.to(device)
@@ -74,8 +75,9 @@ def train_conv1d_mhsa_ctc_model(rank,world_size, experiment_name, data_root,trai
 
         if rank == 0 and (epoch+1)%CFG.validation_freq==0:
             nld,wa,vloss = validation_callback(epoch)
-            print(f"Epoch: {epoch}, Norm distance: {nld:.5f}, word accuracy: {wa:.5f}, train loss: {train_loss:.5f}, valid loss: {vloss:.5f} ")
-   
+            logger.info(f"Epoch: {epoch}, Norm distance: {nld:.5f}, word accuracy: {wa:.5f}, train loss: {train_loss:.5f}, valid loss: {vloss:.5f} ")
+    logger.info("Finished training")
+
 import os
 import pandas as pd
 from argparse import ArgumentParser
