@@ -1,11 +1,7 @@
 # Under Docker image: nvcr.io/nvidia/tensorflow:23.05-tf2-py3
-pandas==2.0.2
 joblib==1.2.0
 tqdm==4.65.0
-scikit-learn==1.2.0
-pyarrow==10.0.1.dev0+ga6eabc2b.d20230428
+pyarrow==12.0.1
 fastparquet==2023.4.0
-plotly==5.15.0
 python-Levenshtein==0.21.1
-nltk==3.8.1
-tensorboard_plugin_profile==2.13.0
+torchcontrib==0.0.2
