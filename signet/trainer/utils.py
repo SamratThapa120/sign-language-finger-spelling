@@ -19,10 +19,11 @@ class GreedyCTCDecoder(torch.nn.Module):
           List[str]: The resulting transcript
         """
         indices = torch.argmax(emission, dim=-1)  # [num_seq,]
+        original = "".join([self.labels[i.item()] for i in indices])
         indices = torch.unique_consecutive(indices, dim=-1)
         indices = [i for i in indices.numpy() if i != self.blank]
         joined = "".join([self.labels[i] for i in indices])
-        return joined
+        return joined,original
     
 class CTCLossBatchFirst(torch.nn.Module):
     def __init__(self,blank=0,zero_infinity=False):

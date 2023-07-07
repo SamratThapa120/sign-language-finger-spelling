@@ -65,6 +65,23 @@ class Swish(nn.Module):
         return x * torch.sigmoid(x)
 
 
+class LateDropout(nn.Module):
+    def __init__(self, p=0.5, noise_shape=None, start_step=0):
+        super().__init__()
+        self.p = p
+        self.start_step = start_step
+        self.train_counter = 0
+        self.noise_shape = noise_shape
+        self.dropout = nn.Dropout(p)
+    def forward(self, x):
+        if self.train_counter >= self.start_step and self.training:
+            return self.dropout(x)
+        self.train_counter += 1
+        return x
+
+    def _make_noise(self, *sizes):
+        return torch.zeros(*sizes)
+
 class TransformerBlock(nn.Module):
     def __init__(self,dim=256, num_heads=4, expand=4, attn_dropout=0.2, drop_rate=0.2, activation=Swish()):
         super().__init__()
@@ -139,13 +156,13 @@ class Conv1DBlock(nn.Module):
 
 
 class Cnn1dMhsaFeatureExtractor(nn.Module):
-    def __init__(self, CFG):
+    def __init__(self, CFG,dropout_start=0):
         super(Cnn1dMhsaFeatureExtractor, self).__init__()
         
         # self.masking = nn.ConstantPad1d((0, CFG.max_len - CFG.CHANNELS), CFG.PAD[0])
         self.stem_conv = nn.Linear(CFG.CHANNELS, CFG.dim, bias=False)
         self.stem_bn = nn.BatchNorm1d(CFG.dim, momentum=0.95)
-        self.dropout = nn.Dropout(0.8)
+        self.dropout = LateDropout(0.8,start_step=dropout_start)
 
         self.blocks1 = nn.Sequential(
             Conv1DBlock(CFG.dim, 17, drop_rate=0.2),
@@ -194,6 +211,6 @@ class Cnn1dMhsaFeatureExtractor(nn.Module):
         x = self.dropout(x)
         x = self.classifier(x)
 
-        return torch.transpose(x,1,2)
+        return torch.nn.functional.log_softmax(torch.transpose(x,1,2),dim=-1)
 
 

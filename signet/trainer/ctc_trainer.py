@@ -1,9 +1,9 @@
 import sys
 sys.path.append("./")
 import torch
+import torch.nn.init as init
 from torch.utils.data import DataLoader
 from torch.optim import AdamW
-from torch.optim.lr_scheduler import OneCycleLR
 from torch.cuda.amp import GradScaler, autocast
 
 from signet.dataset.dataset import SignLanguageDataset
@@ -15,6 +15,7 @@ from torchcontrib.optim import SWA
 import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data.distributed import DistributedSampler
+from signet.trainer.pt_utils.custom_schedulers import OneCycleLR
 from signet.trainer.utils import CTCLossBatchFirst,get_logger
 from tqdm import tqdm
 
@@ -38,38 +39,53 @@ def train_conv1d_mhsa_ctc_model(rank,world_size, experiment_name, data_root,trai
     valid_loader = DataLoader(valid_dataset, batch_size=CFG.val_batch_size, pin_memory=False,num_workers=CFG.num_workers_valid)
 
     device = torch.device('cuda:' + str(rank))
-    model = Cnn1dMhsaFeatureExtractor(CFG)
+
+    dstart = CFG.dropout_start_epoch*len(train_dataset)
+    model = Cnn1dMhsaFeatureExtractor(CFG,dropout_start=dstart)
+    
+    for name, param in model.named_parameters():
+        try:
+            if 'bias' in name:
+                init.constant_(param, 0.0)
+            elif 'weight' in name:
+                init.kaiming_normal_(param)
+        except Exception as e:  # for batchnorm.
+            if 'weight' in name:
+                param.data.fill_(1)
+            continue
     model = model.to(device)
     model = DDP(model, device_ids=[rank])
 
-    criterion = CTCLossBatchFirst(CFG.blank_index,zero_infinity=CFG.zero_infinity)
-    optimizer = AdamW(model.parameters(), lr=CFG.lr)
+    criterion = CTCLossBatchFirst(CFG.blank_index,zero_infinity=CFG.zero_infinity).to(device)
+    optimizer = torch.optim.RAdam(model.parameters(), lr=CFG.lr,weight_decay=CFG.weight_decay)
+    # optimizer = torch.optim.Adadelta(model.parameters(), lr=CFG.lr, rho=CFG.rho, eps=CFG.eps)
     # optimizer = SWA(optimizer)
-    scaler = GradScaler(enabled=CFG.fp16)
+    # scaler = GradScaler(enabled=CFG.fp16)
 
-    scheduler = OneCycleLR(optimizer, max_lr=CFG.lr, epochs=CFG.epoch, steps_per_epoch=len(train_loader))
-
+    scheduler = OneCycleLR(optimizer,CFG.lr, CFG.epoch, warmup_epochs=CFG.epoch*CFG.warmup,
+                           steps_per_epoch=len(train_loader), resume_epoch=CFG.resume, decay_epochs=CFG.epoch,
+                             lr_min=CFG.lr_min, decay_type=CFG.decay_type, warmup_type='linear')
     if rank == 0:
         validation_callback = LevenshteinCallback(valid_loader,model,CFG,experiment_name,criterion,device)
         logger = get_logger(os.path.join(CFG.output_dir,experiment_name,'logs.txt'))
         logger.info("Starting training....")
     for epoch in range(CFG.epoch):
+        model.train()
         print(f"Epoch [{epoch}/{CFG.epoch}]")
         train_loss = 0
         for idx, (input_features, labels, inp_length, target_length) in tqdm(enumerate(train_loader),total=len(train_loader),disable=rank!=0):
-            input_features, labels = input_features.to(device), labels.to(device)
-            
+            input_features, labels,inp_length,target_length= input_features.to(device), labels.to(device), inp_length.to(device), target_length.to(device)
+
             output = model(input_features)
+            torch.backends.cudnn.enabled = False
             loss = criterion(output, labels, inp_length, target_length)
-            
-            train_loss += loss.item()
-
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            torch.backends.cudnn.enabled = True
             optimizer.zero_grad()
-
-        scheduler.step()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), CFG.grad_clip) 
+            optimizer.step()
+            train_loss += loss.item()
+            scheduler.step()
 
         train_loss /= len(train_loader)
 
