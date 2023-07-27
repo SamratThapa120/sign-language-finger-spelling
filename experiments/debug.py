@@ -2,35 +2,27 @@ import sys
 import os
 import glob
 import pandas as pd
-sys.path.append("./")
+import json
 
+sys.path.append("./")
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-from signet.configs.Conv1D_LSTM_CTC_Loss import Conv1D_LSTM_CTC_Loss
-from signet.trainer.ctc_loss_trainer import train_conv1d_mhsa_ctc_model
-from sklearn.model_selection import GroupKFold
+from signet.configs.ctc_loss_with_downsampled_deploy import ctc_loss_encdec_params
+from signet.trainer.ctc_loss_downsampled_trainer import train_conv1d_mhsa_ctc_model
 
-train_df = pd.read_csv("../dataset/train.csv")
+data_root="../dataset/tdf_data"
+experiment_name="fold3_poseinfo_downsampled_deploy_aughigh"
+CFG = ctc_loss_encdec_params() 
+CFG.lr=0.001
+all_nan = json.load(open("../dataset/folds/allnan.json"))
+seq_length = json.load(open("../dataset/folds/seqlen.json"))
+train_df = pd.read_csv("../dataset/folds/fold3_train.csv")
+valid_df = pd.read_csv("../dataset/folds/fold3_valid.csv")
+train_df["seqlen"] = train_df.files.apply(lambda x: seq_length[x.split(".")[0]])
+train_df["labellen"] = train_df.labels.apply(len)
+train_df = train_df[(train_df.seqlen>train_df.labellen*2)& train_df.files.apply(lambda x: x.split(".")[0] not in  all_nan)]
 
-ALL_FILENAMES = glob.glob('../dataset/tdf_data/*.tfrecords')
-print(len(ALL_FILENAMES))
+train_files = train_df.files.apply(lambda x: os.path.join(data_root,x.replace(".npy",".tfrecords")))
+valid_files = valid_df.files.apply(lambda x: os.path.join(data_root,x.replace(".npy",".tfrecords")))
 
-CFG = Conv1D_LSTM_CTC_Loss()
-
-gkf = GroupKFold(n_splits=5)
-for train, test in gkf.split(train_df.sequence_id, groups=train_df.participant_id):
-    valid_seqid = set()
-    for idx in test:
-        valid_seqid.add(train_df.sequence_id[idx])
-train_files = []
-valid_files = []
-for fpth in ALL_FILENAMES:
-    if int(os.path.split(fpth)[-1].split(".")[0]) in valid_seqid:
-        valid_files.append(fpth)
-    else:
-        train_files.append(fpth)
-
-
-experiment_name="simple_exp"
-
-train_conv1d_mhsa_ctc_model(experiment_name,CFG,train_files[:5000], valid_files[:1000])
+train_conv1d_mhsa_ctc_model(experiment_name,CFG,train_files, valid_files)

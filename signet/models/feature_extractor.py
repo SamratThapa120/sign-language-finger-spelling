@@ -16,25 +16,6 @@ class ECA(tf.keras.layers.Layer):
         nn = nn[:,None,:]
         return inputs * nn
 
-class LateDropout(tf.keras.layers.Layer):
-    def __init__(self, rate, noise_shape=None, start_step=0, **kwargs):
-        super().__init__(**kwargs)
-        self.supports_masking = True
-        self.rate = rate
-        self.start_step = start_step
-        self.dropout = tf.keras.layers.Dropout(rate, noise_shape=noise_shape)
-      
-    def build(self, input_shape):
-        super().build(input_shape)
-        agg = tf.VariableAggregation.ONLY_FIRST_REPLICA
-        self._train_counter = tf.Variable(0, dtype="int64", aggregation=agg, trainable=False)
-
-    def call(self, inputs, training=False):
-        x = tf.cond(self._train_counter < self.start_step, lambda:inputs, lambda:self.dropout(inputs, training=training))
-        if training:
-            self._train_counter.assign_add(1)
-        return x
-
 class CausalDWConv1D(tf.keras.layers.Layer):
     def __init__(self, 
         kernel_size=17,
@@ -89,18 +70,18 @@ class MultiHeadSelfAttention(tf.keras.layers.Layer):
         return x
 
 
-def TransformerBlock(dim=256, num_heads=4, expand=4, attn_dropout=0.2, drop_rate=0.2, activation='swish'):
+def TransformerBlock(CFG,expand=4, attn_dropout=0.2, drop_rate=0.2, activation='swish'):
     def apply(inputs):
         x = inputs
         x = tf.keras.layers.BatchNormalization(momentum=0.95)(x)
-        x = MultiHeadSelfAttention(dim=dim,num_heads=num_heads,dropout=attn_dropout)(x)
+        x = MultiHeadSelfAttention(dim=CFG.dim,num_heads=CFG.num_heads,dropout=attn_dropout)(x)
         x = tf.keras.layers.Dropout(drop_rate, noise_shape=(None,1,1))(x)
         x = tf.keras.layers.Add()([inputs, x])
         attn_out = x
 
         x = tf.keras.layers.BatchNormalization(momentum=0.95)(x)
-        x = tf.keras.layers.Dense(dim*expand, use_bias=False, activation=activation)(x)
-        x = tf.keras.layers.Dense(dim, use_bias=False)(x)
+        x = tf.keras.layers.Dense(CFG.dim*expand, use_bias=False, activation=activation)(x)
+        x = tf.keras.layers.Dense(CFG.dim, use_bias=False)(x)
         x = tf.keras.layers.Dropout(drop_rate, noise_shape=(None,1,1))(x)
         x = tf.keras.layers.Add()([attn_out, x])
         return x
@@ -159,35 +140,23 @@ def Conv1DBlock(channel_size,
 
 def Cnn1dMhsaFeatureExtractor(CFG):
     inp = tf.keras.Input((CFG.max_len,CFG.CHANNELS))
-    x = tf.keras.layers.Masking(mask_value=CFG.PAD[0],input_shape=(CFG.max_len,CFG.CHANNELS))(inp)
-    ksize = 17
+    x = inp
+    if CFG.use_mask:
+        x = tf.keras.layers.Masking(mask_value=CFG.PAD[0],input_shape=(CFG.max_len,CFG.CHANNELS))(inp)
+    ksize = CFG.kernel_size
     x = tf.keras.layers.Dense(CFG.dim, use_bias=False,name='stem_conv')(x)
     x = tf.keras.layers.BatchNormalization(momentum=0.95,name='stem_bn')(x)
 
-    x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-    x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-    x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-    x = TransformerBlock(CFG.dim,expand=2)(x)
-
-    x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-    x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-    x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-    x = TransformerBlock(CFG.dim,expand=2)(x)
-
-    if CFG.dim == 384: #for the 4x sized model
-        x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-        x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-        x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-        x = TransformerBlock(CFG.dim,expand=2)(x)
-
-        x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-        x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-        x = Conv1DBlock(CFG.dim,ksize,drop_rate=0.2)(x)
-        x = TransformerBlock(CFG.dim,expand=2)(x)
+    for _ in range(CFG.num_feature_blocks):
+        x = Conv1DBlock(CFG.dim,ksize,drop_rate=CFG.blocks_dropout)(x)
+        x = Conv1DBlock(CFG.dim,ksize,drop_rate=CFG.blocks_dropout)(x)
+        x = Conv1DBlock(CFG.dim,ksize,drop_rate=CFG.blocks_dropout)(x)
+        x = TransformerBlock(CFG,expand=2)(x)
 
     x = tf.keras.layers.Dense(CFG.dim*2,activation=None,name='top_conv')(x)
     # x = tf.keras.layers.GlobalAveragePooling1D()(x)
-    x = LateDropout(0.8, start_step=CFG.dropout_step)(x)
+    # x = LateDropout(0.2, start_step=dropout_step)(x)
+    x = tf.keras.layers.Dropout(0.2)(x)
     x = tf.keras.layers.Dense(CFG.NUM_CLASSES,name='classifier')(x)
 
     

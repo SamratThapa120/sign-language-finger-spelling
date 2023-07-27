@@ -1,2 +1,8 @@
 **/__pycache__/
 **/ipynb_checkpoints/
+tf_lite/data
+tf_lite/data_fp16
+*.db
+NOTES
+random_cheks.ipynb
+run_experiment*.sh

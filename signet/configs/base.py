@@ -1,9 +1,11 @@
 import numpy as np
 class Base:
+    char_to_idx = {" ":0,"!":1,"#":2,"$":3,"%":4,"&":5,"'":6,"(":7,")":8,"*":9,"+":10,",":11,"-":12,".":13,"/":14,"0":15,"1":16,"2":17,"3":18,"4":19,"5":20,"6":21,"7":22,"8":23,"9":24,":":25,";":26,"=":27,"?":28,"@":29,"[":30,"_":31,"a":32,"b":33,"c":34,"d":35,"e":36,"f":37,"g":38,"h":39,"i":40,"j":41,"k":42,"l":43,"m":44,"n":45,"o":46,"p":47,"q":48,"r":49,"s":50,"t":51,"u":52,"v":53,"w":54,"x":55,"y":56,"z":57,"~":58}
+    idx_to_char = {v:k for k,v in char_to_idx.items()}
     ROWS_PER_FRAME = 543
-    MAX_WORD_LENGTH  = 45
+    MAX_WORD_LENGTH  = 64
     NUM_CLASSES = 60
-    PAD = (-100.0, np.int64(-1))  # padding value. First is padding value for input sequence, and second for prediction sequence.
+    PAD = (-186.1324, np.int64(-1))  # padding value. First is padding value for input sequence, and second for prediction sequence.
     NOSE=[
         1,2,98,327
     ]

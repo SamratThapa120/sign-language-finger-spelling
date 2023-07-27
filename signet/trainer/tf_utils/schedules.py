@@ -72,7 +72,8 @@ class OneCycleLR(tf.keras.optimizers.schedules.LearningRateSchedule):
             lr = tf.cond(decay_cond, lambda: 0.5 * (self.lr - self.lr_min) * (1 + tf.cos(3.14159265359 * (step - warmup_steps - sustain_steps) / (decay_steps - warmup_steps - sustain_steps))) + self.lr_min, lambda:lr)
         else:
             raise NotImplementedError
-            
+        # if step%self.steps_per_epoch==0:
+            # print(f'\learning rate @ epoch {step/self.steps_per_epoch} step {step} is: {lr}\n')
         return lr
 
     def plot(self):

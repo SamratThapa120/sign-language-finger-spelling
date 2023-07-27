@@ -15,7 +15,7 @@ def interp1d_(x, target_len, method='random'):
         x = tf.image.resize(x, (target_len,tf.shape(x)[1]),method)
     return x
 
-
+@tf.function()
 def flip_lr(x,CFG):
     x,y,z = tf.unstack(x, axis=-1)
     x = 1-x
@@ -45,12 +45,12 @@ def flip_lr(x,CFG):
     return new_x
 
 
-
+@tf.function()
 def spatial_random_affine(xyz,
-    scale  = (0.8,1.2),
+    scale  = (0.5,2),
     shear = (-0.15,0.15),
-    shift  = (-0.1,0.1),
-    degree = (-30,30),
+    shift  = (-0.5,0.5),
+    degree = (-45,45),
 ):
     center = tf.constant([0.5,0.5])
     if scale is not None:
@@ -101,23 +101,37 @@ def temporal_crop(x, length):
     x = x[offset:offset+length]
     return x
 
-def temporal_mask(x, size=(0.2,0.4), mask_value=float('nan')):
-    l = tf.shape(x)[0]
-    mask_size = tf.random.uniform((), *size)
-    mask_size = tf.cast(tf.cast(l, tf.float32) * mask_size, tf.int32)
-    mask_offset = tf.random.uniform((), 0, tf.clip_by_value(l-mask_size,1,l), dtype=tf.int32)
-    x = tf.tensor_scatter_nd_update(x,tf.range(mask_offset, mask_offset+mask_size)[...,None],tf.fill([mask_size,543,3],mask_value))
-    return x
+def temporal_mask(x, targetlen,size=(0.2,0.4)):
+    shape = tf.shape(x)
+    p = tf.random.uniform([], minval=size[0], maxval=size[1])
+    logits = tf.stack([tf.zeros(shape[0]), tf.ones(shape[0]) * tf.math.log(1.0 - p) - tf.math.log(p)], axis=-1)
+    mask = tf.random.categorical(logits, 1)
+    mask = tf.reshape(tf.cast(mask, tf.bool), [-1])
+    masked_x = tf.boolean_mask(x, mask, axis=0)
+    if tf.shape(masked_x)[0] < 2*targetlen:
+        return x
+    else:
+        return masked_x
 
-def spatial_mask(x, size=(0.2,0.4), mask_value=float('nan')):
-    mask_offset_y = tf.random.uniform(())
-    mask_offset_x = tf.random.uniform(())
-    mask_size = tf.random.uniform((), *size)
-    mask_x = (mask_offset_x<x[...,0]) & (x[...,0] < mask_offset_x + mask_size)
-    mask_y = (mask_offset_y<x[...,1]) & (x[...,1] < mask_offset_y + mask_size)
-    mask = mask_x & mask_y
-    x = tf.where(mask[...,None], mask_value, x)
-    return x
+
+def spatial_mask(x, erasable_landmarks, size=(0,1), mask_value=float('nan')):
+    p = tf.random.uniform((), minval=size[0], maxval=size[1])
+
+    # Use tf.shape to get dynamic shape
+    mask_shape = [tf.shape(x)[0], tf.size(erasable_landmarks), tf.shape(x)[2]]
+
+    mask = tf.random.uniform(mask_shape) < p
+    mask = tf.reduce_any(mask, axis=-1, keepdims=True)
+    mask = tf.repeat(mask, tf.shape(x)[-1], axis=-1)
+    update = tf.fill(mask_shape, mask_value)
+
+    indices = tf.meshgrid(tf.range(tf.shape(x)[0]), erasable_landmarks, tf.range(tf.shape(x)[2]), indexing='ij')
+    indices = tf.stack(indices, axis=-1)
+
+    masked = tf.tensor_scatter_nd_update(x, indices, tf.where(mask, update, tf.gather_nd(x, indices)))
+    return masked
+
+
 
 def resample(x, rate=(0.8,1.2)):
     rate = tf.random.uniform((), rate[0], rate[1])
@@ -127,17 +141,32 @@ def resample(x, rate=(0.8,1.2)):
     return new_x
 
 
-def augment_fn(x, always=False, max_len=None):
-    # if tf.random.uniform(())<0.8 or always:
-    #     x = resample(x, (0.5,1.5))
-    if tf.random.uniform(())<0.5 or always:
-        x = flip_lr(x)
-    # if max_len is not None:
-    #     x = temporal_crop(x, max_len)
-    if tf.random.uniform(())<0.75 or always:
+@tf.function()
+def freeze_frames(x, maxlen):
+    seqlen = tf.shape(x)[0]
+    if seqlen >= maxlen:
+        return x
+    else:
+        # Compute the number of repeats
+        repeats_needed = tf.cast(maxlen - seqlen,tf.float32)
+
+        # Generate random numbers, apply softmax, and scale
+        random_numbers = tf.random.uniform(shape=(seqlen,), minval=0, maxval=1)
+        softmax_numbers = tf.nn.softmax(random_numbers)
+        repeats = 1+tf.cast(softmax_numbers*repeats_needed, tf.float32)
+        x = tf.repeat(x, repeats=tf.cast(repeats, tf.int32), axis=0)
+        return x
+
+@tf.function()
+def augment_fn(x, tarlen,CFG):
+    if tf.random.uniform(())<CFG.tempmask_probability:
+        x = temporal_mask(x,tarlen,CFG.tempmask_range)
+    if tf.random.uniform(())<CFG.freeze_probability:
+        x = freeze_frames(x,CFG.max_len)
+    if tf.random.uniform(())<CFG.flip_lr_probability:
+        x = flip_lr(x,CFG)
+    if tf.random.uniform(())<CFG.random_affine_probability:
         x = spatial_random_affine(x)
-    # if tf.random.uniform(())<0.5 or always:
-    #     x = temporal_mask(x)
-    if tf.random.uniform(())<0.5 or always:
-        x = spatial_mask(x)
+    if tf.random.uniform(())<CFG.erase_probability:
+        x = spatial_mask(x,CFG.ERASABLE_LANDMARKS)
     return x
