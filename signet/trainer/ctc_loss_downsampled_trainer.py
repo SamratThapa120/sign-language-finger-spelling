@@ -15,7 +15,7 @@ from .tf_utils.learners import FGM, AWP
 
 from signet.dataset.utils import get_ctc_dataset
 from signet.models.feature_extractor_downsampled import Cnn1dMhsaFeatureExtractor
-from signet.losses.ctc import CTCLoss
+from signet.losses.ctc import CTCLoss,CTCFocalLoss,CTCMWERLoss
 from signet.configs.Conv1D_LSTM_CTC_Loss import Conv1D_LSTM_CTC_Loss
 from signet.trainer.utils import ctc_decode
 from signet.trainer.callbacks import LevenshteinCallbackCTCDecoder
@@ -82,9 +82,15 @@ def train_conv1d_mhsa_ctc_model(experiment_name,CFG,train_files, valid_files=Non
         opt = tfa.optimizers.RectifiedAdam(learning_rate=schedule, weight_decay=CFG.weight_decay, sma_threshold=4)#, clipvalue=1.)
         opt = tfa.optimizers.Lookahead(opt,sync_period=5)
 
+        if CFG.loss_type=="focal" :
+            loss_func = CTCFocalLoss(blank_index=CFG.blank_index,alpha=CFG.alpha,gamma=CFG.gamma)
+        elif CFG.loss_type=="min_wer" :
+            loss_func = CTCMWERLoss(beam_width=CFG.beam_width)
+        else:
+            loss_func=CTCLoss(CFG.blank_index)
         model.compile(
             optimizer=opt,
-            loss=CTCLoss(CFG.blank_index),
+            loss=loss_func,
             metrics=[],
         )
     # tf.profiler.experimental.start(os.path.join(CFG.output_dir,experiment_name,'log_data'))

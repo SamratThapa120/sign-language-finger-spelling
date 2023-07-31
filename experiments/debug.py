@@ -7,13 +7,13 @@ import json
 sys.path.append("./")
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-from signet.configs.ctc_loss_with_downsampled_deploy import ctc_loss_encdec_params
+from signet.configs.ctc_loss_with_downsampled_tune import ctc_loss_encdec_params
 from signet.trainer.ctc_loss_downsampled_trainer import train_conv1d_mhsa_ctc_model
 
 data_root="../dataset/tdf_data"
-experiment_name="fold3_poseinfo_downsampled_deploy_aughigh"
+experiment_name="fold3_poseinfo_moreaugs"
 CFG = ctc_loss_encdec_params() 
-CFG.lr=0.001
+
 all_nan = json.load(open("../dataset/folds/allnan.json"))
 seq_length = json.load(open("../dataset/folds/seqlen.json"))
 train_df = pd.read_csv("../dataset/folds/fold3_train.csv")

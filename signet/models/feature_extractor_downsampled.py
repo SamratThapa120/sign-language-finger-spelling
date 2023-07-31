@@ -41,7 +41,7 @@ class CausalDWConv1D(tf.keras.layers.Layer):
         return x
     
 class MultiHeadSelfAttention(tf.keras.layers.Layer):
-    def __init__(self, dim=256, num_heads=4, dropout=0, **kwargs):
+    def __init__(self, dim=256, num_heads=4, dropout=0,attention_span=0, **kwargs):
         super().__init__(**kwargs)
         self.dim = dim
         self.scale = self.dim ** -0.5
@@ -50,6 +50,14 @@ class MultiHeadSelfAttention(tf.keras.layers.Layer):
         self.drop1 = tf.keras.layers.Dropout(dropout)
         self.proj = tf.keras.layers.Dense(dim, use_bias=False)
         self.supports_masking = True
+        self.attention_span=attention_span
+    def generate_mask(self, input_shape, attention_span):
+        seq_len = input_shape[1]  # assuming input_shape is (batch_size, seq_len, dim)
+        idxs = tf.range(seq_len)
+        mask = tf.abs(idxs[None, :] - idxs[:, None]) <= attention_span
+        # add extra dimensions to match the shape of attn
+        mask = mask[None, None, :, :]
+        return tf.cast(mask, dtype=tf.float32)
 
     def call(self, inputs, mask=None):
         qkv = self.qkv(inputs)
@@ -60,6 +68,8 @@ class MultiHeadSelfAttention(tf.keras.layers.Layer):
 
         if mask is not None:
             mask = mask[:, None, None, :]
+        elif self.attention_span > 0:
+            mask = self.generate_mask(tf.shape(inputs), self.attention_span)
 
         attn = tf.keras.layers.Softmax(axis=-1)(attn, mask=mask)
         attn = self.drop1(attn)
@@ -74,7 +84,7 @@ def TransformerBlock(CFG,expand=4, attn_dropout=0.2, drop_rate=0.2, activation='
     def apply(inputs):
         x = inputs
         x = tf.keras.layers.BatchNormalization(momentum=0.95)(x)
-        x = MultiHeadSelfAttention(dim=CFG.dim,num_heads=CFG.num_heads,dropout=attn_dropout)(x)
+        x = MultiHeadSelfAttention(dim=CFG.dim,num_heads=CFG.num_heads,dropout=attn_dropout,attention_span=CFG.attention_span)(x)
         x = tf.keras.layers.Dropout(drop_rate, noise_shape=(None,1,1))(x)
         x = tf.keras.layers.Add()([inputs, x])
         attn_out = x
@@ -157,25 +167,23 @@ def Cnn1dMhsaFeatureExtractor(CFG):
     ksize = CFG.kernel_size
     x = tf.keras.layers.Dense(CFG.dim, use_bias=False,name='stem_conv')(x)
     x = tf.keras.layers.BatchNormalization(momentum=0.95,name='stem_bn')(x)
-    downsample = CFG.num_feature_blocks - apply_times(CFG.max_len,CFG.kernel_size,"valid",2,CFG.MAX_WORD_LENGTH)
+    downsample = CFG.num_feature_blocks - apply_times(CFG.max_len,CFG.kernel_size_downsampling,"valid",CFG.downsampling_strides,CFG.MAX_WORD_LENGTH)
     for i in range(CFG.num_feature_blocks):
         x = Conv1DBlock(CFG.dim,ksize,drop_rate=CFG.blocks_dropout)(x)
         x = Conv1DBlock(CFG.dim,ksize,drop_rate=CFG.blocks_dropout)(x)
         x = Conv1DBlock(CFG.dim,ksize,drop_rate=CFG.blocks_dropout)(x)
         x = TransformerBlock(CFG,expand=2)(x)
-        if i>downsample:
+        if i>downsample and CFG.do_downsample:
             x = tf.keras.layers.DepthwiseConv1D(
-                CFG.kernel_size,
-                strides=2,
+                CFG.kernel_size_downsampling,
+                strides=CFG.downsampling_strides,
                 dilation_rate=1,
                 padding='valid',
                 use_bias=False,
                 depthwise_initializer='glorot_uniform',
-                name=str(i) + 'pooling_conv')(x)
+                name=str(i) + 'downsample_conv')(x)
     x = tf.keras.layers.Dense(CFG.dim*2,activation=None,name='top_conv')(x)
-    # x = tf.keras.layers.GlobalAveragePooling1D()(x)
-    # x = LateDropout(0.2, start_step=dropout_step)(x)
-    x = tf.keras.layers.Dropout(0.2)(x)
+    x = tf.keras.layers.Dropout(CFG.final_dropout)(x)
     x = tf.keras.layers.Dense(CFG.NUM_CLASSES,name='classifier')(x)
 
     

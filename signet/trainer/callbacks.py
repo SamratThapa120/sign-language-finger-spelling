@@ -47,6 +47,8 @@ class LevenshteinCallbackCTCDecoder(tf.keras.callbacks.Callback):
 
         # self.on_epoch_end(-1)
     def on_epoch_end(self, epoch, logs=None):
+        if epoch == 15:  # Epochs are zero-indexed
+            self.model.stop_training = True
         y_preds = self.model.predict(self.validation_data,steps = self.spe)
         predictions = []
         targets = []
