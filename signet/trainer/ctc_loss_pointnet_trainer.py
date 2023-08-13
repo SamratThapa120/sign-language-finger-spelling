@@ -13,8 +13,8 @@ from .tf_utils.schedules import OneCycleLR, ListedLR
 from .tf_utils.callbacks import Snapshot, SWA
 from .tf_utils.learners import FGM, AWP
 
-from signet.dataset.utils import get_ctc_dataset
-from signet.models.feature_extractor_downsampled import Cnn1dMhsaFeatureExtractor
+from signet.dataset.utils import get_ctc_pointnet_dataset
+from signet.models.feature_extractor_pointnet_head import Cnn1dMhsaFeatureExtractor
 from signet.losses.ctc import CTCLoss,CTCFocalLoss,CTCMWERLoss
 from signet.configs.Conv1D_LSTM_CTC_Loss import Conv1D_LSTM_CTC_Loss
 from signet.trainer.utils import ctc_decode
@@ -49,7 +49,7 @@ def get_strategy(CFG: Conv1D_LSTM_CTC_Loss):
     
     return strategy, REPLICAS
     
-def train_conv1d_mhsa_ctc_model(experiment_name,CFG,train_files, valid_files=None,hp_tuning=False,min_model_size=10000,max_model_size=10000000,train_df=None):
+def train_conv1d_mhsa_ctc_model(experiment_name,CFG,train_files, valid_files=None,hp_tuning=False,min_model_size=10000,max_model_size=10000000):
     set_seed(42) 
     os.makedirs(os.path.join(CFG.output_dir,experiment_name),exist_ok=True)
     strategy, N_REPLICAS = get_strategy(CFG)    
@@ -68,8 +68,8 @@ def train_conv1d_mhsa_ctc_model(experiment_name,CFG,train_files, valid_files=Non
         policy = mixed_precision.Policy('float32')
         mixed_precision.set_global_policy(policy)
 
-    train_ds = get_ctc_dataset(train_files, CFG,shuffle=32768,repeat=True,augment=True,dataframe=train_df)
-    valid_ds = get_ctc_dataset(valid_files, CFG, shuffle=False,repeat=False,augment=False,dataframe=None)
+    train_ds = get_ctc_pointnet_dataset(train_files, CFG,shuffle=32768,repeat=True,augment=True)
+    valid_ds = get_ctc_pointnet_dataset(valid_files, CFG, shuffle=False,repeat=False,augment=False)
     
     num_train = len(train_files)
     num_valid = len(valid_files)
@@ -115,7 +115,7 @@ def train_conv1d_mhsa_ctc_model(experiment_name,CFG,train_files, valid_files=Non
             model.evaluate(valid_ds)
 
     logger = tf.keras.callbacks.CSVLogger(os.path.join(CFG.output_dir,experiment_name,'logs.csv'))
-    levenshtein_cb = LevenshteinCallbackCTCDecoder(valid_ds,model,CFG,experiment_name,validation_steps=-(num_valid//-CFG.batch_size),trainepochs=CFG.train_epochs)  
+    levenshtein_cb = LevenshteinCallbackCTCDecoder(valid_ds,model,CFG,experiment_name,validation_steps=-(num_valid//-CFG.batch_size),trainepochs=CFG.train_epochs)
     nan_callback = tf.keras.callbacks.TerminateOnNaN()
     # tb_callback = tf.keras.callbacks.TensorBoard(log_dir=os.path.join(CFG.output_dir,experiment_name,'log_data'),
                                             #  profile_batch=(10,20))
@@ -133,10 +133,10 @@ def train_conv1d_mhsa_ctc_model(experiment_name,CFG,train_files, valid_files=Non
         epochs=CFG.epoch,
         steps_per_epoch=steps_per_epoch,
         callbacks=callbacks,
-        validation_data=valid_ds,
-        verbose=CFG.verbose,
-        validation_steps=-(num_valid//-CFG.batch_size),
-        validation_freq=CFG.validation_frequency
+        # validation_data=valid_ds,
+        # verbose=CFG.verbose,
+        # validation_steps=-(num_valid//-CFG.batch_size),
+        # validation_freq=CFG.validation_frequency
     )
     if hp_tuning:
         return levenshtein_cb.best_metric

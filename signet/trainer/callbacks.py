@@ -32,10 +32,10 @@ def get_logger(path):
     return logger
 
 class LevenshteinCallbackCTCDecoder(tf.keras.callbacks.Callback):
-    def __init__(self, validation_data,model,CFG,experiment_name,validation_steps):
+    def __init__(self, validation_data,model,CFG,experiment_name,validation_steps,trainepochs=100):
         super(LevenshteinCallbackCTCDecoder, self).__init__()
         self.validation_data = validation_data
-        self.y_trues = [label for _, label in self.validation_data.unbatch().as_numpy_iterator()]
+        self.y_trues = [data[1] for data in self.validation_data.unbatch().as_numpy_iterator()]
 
         self.model = model
         self.CFG = CFG
@@ -44,10 +44,10 @@ class LevenshteinCallbackCTCDecoder(tf.keras.callbacks.Callback):
         self.spe = validation_steps
         os.makedirs(os.path.join(CFG.output_dir,experiment_name,"weights"),exist_ok=True)
         self.logger = get_logger(os.path.join(self.CFG.output_dir,self.experiment_name,'logs.txt'))
-
+        self.trainepochs = trainepochs
         # self.on_epoch_end(-1)
     def on_epoch_end(self, epoch, logs=None):
-        if epoch == 15:  # Epochs are zero-indexed
+        if epoch == self.trainepochs:  # Epochs are zero-indexed
             self.model.stop_training = True
         y_preds = self.model.predict(self.validation_data,steps = self.spe)
         predictions = []

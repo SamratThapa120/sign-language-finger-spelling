@@ -1,5 +1,26 @@
 import tensorflow as tf
 
+class CTCLossLogitLabelLen(tf.keras.losses.Loss):
+    def __init__(self,blank_index=59,max_char_len=45,use_sparse=False,name="ctc_loss_labellen_logitlen",**kwargs):
+        super().__init__(name=name,**kwargs)
+        self.blank_index = blank_index
+        self.use_sparse = use_sparse
+        self.max_char_len = 45
+    def call(self,metainfo,logits):
+        labels = metainfo[:,:self.max_char_len,0]
+        label_length = tf.reduce_sum(tf.cast(metainfo[:,:,1] != 0, tf.int32), axis=-1)
+        logit_length =tf.reduce_sum(tf.cast(metainfo[:,:,2] != 0, tf.int32), axis=-1)
+        loss = tf.nn.ctc_loss(
+                labels=labels,
+                logits=logits,
+                label_length=label_length,
+                logit_length=logit_length,
+                blank_index=self.blank_index,
+                logits_time_major=False
+            )
+        loss = tf.reduce_mean(loss)
+        return loss
+    
 class CTCLoss(tf.keras.losses.Loss):
     def __init__(self,blank_index=59,use_sparse=False,name="ctc_loss",**kwargs):
         super().__init__(name=name,**kwargs)

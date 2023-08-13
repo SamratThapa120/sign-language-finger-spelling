@@ -13,9 +13,9 @@ from .tf_utils.schedules import OneCycleLR, ListedLR
 from .tf_utils.callbacks import Snapshot, SWA
 from .tf_utils.learners import FGM, AWP
 
-from signet.dataset.utils import get_ctc_dataset
-from signet.models.feature_extractor_downsampled import Cnn1dMhsaFeatureExtractor
-from signet.losses.ctc import CTCLoss,CTCFocalLoss,CTCMWERLoss
+from signet.dataset.utils import get_ctc_dataset_with_lengths
+from signet.models.feature_extractor_downsampled_customloop import Cnn1dMhsaFeatureExtractor
+from signet.losses.ctc import CTCLossLogitLabelLen
 from signet.configs.Conv1D_LSTM_CTC_Loss import Conv1D_LSTM_CTC_Loss
 from signet.trainer.utils import ctc_decode
 from signet.trainer.callbacks import LevenshteinCallbackCTCDecoder
@@ -68,26 +68,20 @@ def train_conv1d_mhsa_ctc_model(experiment_name,CFG,train_files, valid_files=Non
         policy = mixed_precision.Policy('float32')
         mixed_precision.set_global_policy(policy)
 
-    train_ds = get_ctc_dataset(train_files, CFG,shuffle=32768,repeat=True,augment=True,dataframe=train_df)
-    valid_ds = get_ctc_dataset(valid_files, CFG, shuffle=False,repeat=False,augment=False,dataframe=None)
+    train_ds = get_ctc_dataset_with_lengths(train_files, CFG,shuffle=32768,repeat=True,augment=True,dataframe=train_df)
+    valid_ds = get_ctc_dataset_with_lengths(valid_files, CFG, shuffle=False,repeat=False,augment=False,dataframe=None)
     
     num_train = len(train_files)
     num_valid = len(valid_files)
     steps_per_epoch = num_train//CFG.batch_size
     with strategy.scope():
         model = Cnn1dMhsaFeatureExtractor(CFG)
-
         schedule = OneCycleLR(CFG.lr, CFG.epoch, warmup_epochs=CFG.warmup_epochs, steps_per_epoch=steps_per_epoch, resume_epoch=CFG.start_epoch, decay_epochs=CFG.epoch, lr_min=CFG.lr_min, decay_type=CFG.decay_type, warmup_type=CFG.warmup_type)
                 
         opt = tfa.optimizers.RectifiedAdam(learning_rate=schedule, weight_decay=CFG.weight_decay, sma_threshold=4)#, clipvalue=1.)
         opt = tfa.optimizers.Lookahead(opt,sync_period=5)
 
-        if CFG.loss_type=="focal" :
-            loss_func = CTCFocalLoss(blank_index=CFG.blank_index,alpha=CFG.alpha,gamma=CFG.gamma)
-        elif CFG.loss_type=="min_wer" :
-            loss_func = CTCMWERLoss(beam_width=CFG.beam_width)
-        else:
-            loss_func=CTCLoss(CFG.blank_index)
+        loss_func=CTCLossLogitLabelLen(CFG.blank_index)
         model.compile(
             optimizer=opt,
             loss=loss_func,

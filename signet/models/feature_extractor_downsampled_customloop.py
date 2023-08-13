@@ -174,21 +174,11 @@ def Cnn1dMhsaFeatureExtractor(CFG):
     ksize = CFG.kernel_size
     x = tf.keras.layers.Dense(CFG.dim, use_bias=False,name='stem_conv')(x)
     x = tf.keras.layers.BatchNormalization(momentum=0.95,name='stem_bn')(x)
-    downsample = CFG.num_feature_blocks - apply_times(CFG.max_len,CFG.kernel_size_downsampling,"valid",CFG.downsampling_strides,CFG.MAX_WORD_LENGTH)
     for i in range(CFG.num_feature_blocks):
         x = Conv1DBlock(CFG.dim,ksize,drop_rate=CFG.blocks_dropout)(x)
         x = Conv1DBlock(CFG.dim,ksize,drop_rate=CFG.blocks_dropout)(x)
         x = Conv1DBlock(CFG.dim,ksize,drop_rate=CFG.blocks_dropout)(x)
         x = TransformerBlock(CFG,expand=2)(x)
-        if i>downsample and CFG.do_downsample:
-            x = tf.keras.layers.DepthwiseConv1D(
-                (CFG.kernel_size_downsampling,),
-                strides=CFG.downsampling_strides,
-                dilation_rate=1,
-                padding='valid',
-                use_bias=False,
-                depthwise_initializer='glorot_uniform',
-                name=str(i) + 'downsample_conv')(x)
     x = tf.keras.layers.Dense(CFG.dim*2,activation=None,name='top_conv')(x)
     x = tf.keras.layers.Dropout(CFG.final_dropout)(x)
     x = tf.keras.layers.Dense(CFG.NUM_CLASSES,name='classifier')(x)

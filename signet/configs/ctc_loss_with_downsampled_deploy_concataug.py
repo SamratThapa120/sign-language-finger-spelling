@@ -27,18 +27,18 @@ class ctc_loss_encdec_params(Base):
     drop_remainder=False
     augment=True
     flip_lr_probability=0.5
-    random_affine_probability=0.8
-    freeze_probability=0.1
-    tempmask_probability=0.8
-    tempmask_range = (0.1,0.4)
-    erase_probability=0.8
+    random_affine_probability=0.75
+    freeze_probability=0.5
+    tempmask_probability=0.75
+    erase_probability=0
+    tempmask_range=(0.2,0.4)
     #training params
     validation_prediction_save_ratio=0.1
     is_jit=True
     summary=True
     one_hot=False
     save_output = True
-    output_dir = '../runs/top_tuned_models'
+    output_dir = '../runs/ctc_with_masking'
     
     seed = 42
     verbose = 1 #0) silent 1) progress bar 2) one line per epoch
@@ -48,7 +48,7 @@ class ctc_loss_encdec_params(Base):
 
     replicas = num_devices
     lr = 0.001
-    weight_decay = 0.003691291783715857
+    weight_decay =3.0053552594924583e-05
     lr_min = 1.5e-06
 
     epoch = 100 
@@ -92,13 +92,5 @@ class ctc_loss_encdec_params(Base):
     downsampling_strides=2
     do_downsample=True
 
-    loss_type="focal"    #focal or min_wer
-    #focal error params
-    alpha=0.5
-    gamma=0.5
-
-    #min_wer params
-    beam_width=8
-
-    def to_dict(self):
-        return {attr: getattr(self, attr) for attr in dir(self) if not attr.startswith('__') and not callable(getattr(self, attr))}
+    combine_tensors=True
+    combine_tensors_probability=0.4

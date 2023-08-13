@@ -3,7 +3,7 @@ import tensorflow as tf
 class ctc_loss_encdec_params(Base):
     
     POINT_LANDMARKS = Base.LIP + Base.LHAND + Base.RHAND+ Base.POSE
-
+    ERASABLE_LANDMARKS = Base.LIP + Base.POSE
     NUM_NODES = len(POINT_LANDMARKS)
     CHANNELS = 6*NUM_NODES
 
@@ -30,7 +30,8 @@ class ctc_loss_encdec_params(Base):
     random_affine_probability=0.75
     freeze_probability=0.5
     tempmask_probability=0.75
-
+    erase_probability=0.5
+    tempmask_range=(0.1,0.4)
     #training params
     validation_prediction_save_ratio=0.1
     is_jit=True
@@ -86,7 +87,7 @@ class ctc_loss_encdec_params(Base):
     final_dropout=0.2
 
     use_mask=False
-    
-    @classmethod
-    def to_dict(cls):
-        return {attr: getattr(cls, attr) for attr in dir(cls) if not attr.startswith('__') and not callable(getattr(cls, attr))}
+    attention_span=0
+    kernel_size_downsampling=12
+    downsampling_strides=2
+    do_downsample=True

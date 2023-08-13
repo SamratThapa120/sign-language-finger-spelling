@@ -35,8 +35,49 @@ class Base:
 
     LHAND = np.arange(468, 489).tolist()
     RHAND = np.arange(522, 543).tolist()
-
+    CONNECTIONS=[
+        [468, 469, 470, 471, 472],
+        [468, 473, 474, 475, 476],
+        [468, 477, 478, 479, 480],
+        [468, 481, 482, 483, 484],
+        [468, 485, 486, 487, 488],
+        [497, 495, 494, 493, 489, 490, 491, 492, 496],
+        [499, 498],
+        [511, 505, 509, 507, 505, 503, 501, 500, 502, 504, 506, 508, 504, 510],
+        [501, 513, 515, 517, 519, 521, 517],
+        [500, 512, 514, 516, 518, 520, 516],
+        [513, 512],
+        [522, 523, 524, 525, 526],
+        [522, 527, 528, 529, 530],
+        [522, 531, 532, 533, 534],
+        [522, 535, 536, 537, 538],
+        [522, 539, 540, 541, 542]
+    ]
+    angle_a,angle_b,angle_c = [],[],[]
+    for connection in CONNECTIONS:
+        for i in range(len(connection) - 2):
+            angle_a.append(connection[i])
+            angle_b.append(connection[i+1])
+            angle_c.append(connection[i+2])
+    length_a,length_b = [],[]
+    for connection in CONNECTIONS:
+        for i in range(len(connection) - 1):
+            length_a.append(connection[i])
+            length_b.append(connection[i+1])
+    useangle=False
+    uselengths=False
     POINT_LANDMARKS = LIP + LHAND + RHAND + NOSE + REYE + LEYE #+POSE
 
     NUM_NODES = len(POINT_LANDMARKS)
     CHANNELS = 6*NUM_NODES
+    combine_tensors=False
+    combine_tensors_probability=0
+    loss_type="ctc"
+    attention_span=0
+    lookahead=True
+    use_depth=True
+    NUM_ANGLES=sum([len(x)-2 for x in CONNECTIONS])
+    NUM_LENGTHS=sum([len(x)-1 for x in CONNECTIONS])
+
+    def to_dict(self):
+        return {attr: getattr(self, attr) for attr in dir(self) if not attr.startswith('__') and not callable(getattr(self, attr))}

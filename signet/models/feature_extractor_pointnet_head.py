@@ -167,12 +167,47 @@ def apply_times(input_length, filter_size, padding, stride,labellen=45):
         i+=1
     return i
 
+class PointNetLayer(tf.keras.Model):
+    def __init__(self, points_num, feature_dim):
+        super(PointNetLayer, self).__init__()
+
+        self.points_num = points_num
+        self.feature_dim = feature_dim
+        self.conv1 = tf.keras.layers.Conv1D(64, 1, use_bias=True,activation='relu')
+        self.conv2 = tf.keras.layers.Conv1D(128, 1,use_bias=True, activation='relu')
+        # self.conv3 = tf.keras.layers.Conv1D(feature_dim, 1,use_bias=True, activation='relu')
+        self.maxpool = tf.keras.layers.MaxPool1D(points_num)
+        self.dense1 = tf.keras.layers.Dense(feature_dim,use_bias=True,activation='relu')
+        # self.dense2 = tf.keras.layers.Dense(256, activation='relu')
+        # self.dense3 = tf.keras.layers.Dense(feature_dim, activation='relu')
+        
+    def call(self, x):
+        batch_size = tf.shape(x)[0]
+        frames = tf.shape(x)[1]
+
+        # Reshape the input tensor to have 3 coordinates for each point
+
+        # Apply convolutions and max pooling
+        net = self.conv1(x)
+        net = self.conv2(net)
+        # net = self.conv3(net)
+        net = tf.reshape(net, [batch_size, frames,self.points_num,128])
+        net = tf.reduce_max(net, axis=2)
+
+        # Reshape to separate frames dimension
+
+        # Apply dense layers
+        net = self.dense1(net)
+        # net = self.dense2(net)
+        # net = self.dense3(net)
+
+        return net
+    
 def Cnn1dMhsaFeatureExtractor(CFG):
-    inp = tf.keras.Input((CFG.max_len,CFG.CHANNELS))
-    x = inp
+    inp = tf.keras.Input((CFG.max_len,len(CFG.POINT_LANDMARKS),6))
     # x = tf.keras.layers.Masking(mask_value=CFG.PAD[0],input_shape=(CFG.max_len,CFG.CHANNELS))(inp)
     ksize = CFG.kernel_size
-    x = tf.keras.layers.Dense(CFG.dim, use_bias=False,name='stem_conv')(x)
+    x = PointNetLayer(len(CFG.POINT_LANDMARKS),CFG.dim)(inp)
     x = tf.keras.layers.BatchNormalization(momentum=0.95,name='stem_bn')(x)
     downsample = CFG.num_feature_blocks - apply_times(CFG.max_len,CFG.kernel_size_downsampling,"valid",CFG.downsampling_strides,CFG.MAX_WORD_LENGTH)
     for i in range(CFG.num_feature_blocks):

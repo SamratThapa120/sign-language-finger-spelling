@@ -27,23 +27,23 @@ class ctc_loss_encdec_params(Base):
     drop_remainder=False
     augment=True
     flip_lr_probability=0.5
-    random_affine_probability=0.8
-    freeze_probability=0.1
-    tempmask_probability=0.8
-    tempmask_range = (0.1,0.4)
-    erase_probability=0.8
+    random_affine_probability=0.75
+    freeze_probability=0.5
+    tempmask_probability=0.75
+    erase_probability=0
+    tempmask_range=(0.2,0.4)
     #training params
     validation_prediction_save_ratio=0.1
     is_jit=True
     summary=True
     one_hot=False
     save_output = True
-    output_dir = '../runs/top_tuned_models'
+    output_dir = '../runs/ctc_with_pointnet'
     
     seed = 42
     verbose = 1 #0) silent 1) progress bar 2) one line per epoch
     
-    num_feature_blocks=7
+    num_feature_blocks=6
     blocks_dropout=0.1
 
     replicas = num_devices
@@ -56,7 +56,7 @@ class ctc_loss_encdec_params(Base):
     warmup_epochs = 20
     batch_size = 128
     val_batch_size = 128
-    validation_frequency=1
+    validation_frequency=100
     snapshot_epochs = []
     swa_epochs = [] #list(range(epoch//2,epoch+1))
     
@@ -91,14 +91,5 @@ class ctc_loss_encdec_params(Base):
     kernel_size_downsampling=12
     downsampling_strides=2
     do_downsample=True
-
-    loss_type="focal"    #focal or min_wer
-    #focal error params
-    alpha=0.5
-    gamma=0.5
-
-    #min_wer params
-    beam_width=8
-
-    def to_dict(self):
-        return {attr: getattr(self, attr) for attr in dir(self) if not attr.startswith('__') and not callable(getattr(self, attr))}
+    lookahead=False
+    loss_type="ctc"
