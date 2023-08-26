@@ -80,10 +80,8 @@ class ctc_loss_encdec_params(Base):
     resume_path=None
     save_frequency=5
     num_heads=8
-    layer_norm_eps=1e-6
     decoder_mlp_dropout = 0.2
     transformer_mlp_expand_ratio=2
-    decoder_blocks=1
     final_dropout=0.2
 
     use_mask=False
