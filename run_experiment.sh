@@ -1,6 +1,1 @@
-# CUDA_VISIBLE_DEVICES=4 python3 experiments/debug.py
-
-while true; do
-    CUDA_VISIBLE_DEVICES=4 python3 experiments/hp_tuning.py hp_tuning1 && break
-    sleep 1
-done
+CUDA_VISIBLE_DEVICES=3 python3 experiments/run_training.py alldata_further_train_model

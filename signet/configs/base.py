@@ -78,6 +78,13 @@ class Base:
     use_depth=True
     NUM_ANGLES=sum([len(x)-2 for x in CONNECTIONS])
     NUM_LENGTHS=sum([len(x)-1 for x in CONNECTIONS])
+    positional_encodings_once=False
+    positional_dropout = 0.2
+    partial_load=False
+    use_transformer=True
+    use_conv=True
 
+    perframe_random_affine_proportion=0
+    handonly_scale_probability=0
     def to_dict(self):
         return {attr: getattr(self, attr) for attr in dir(self) if not attr.startswith('__') and not callable(getattr(self, attr))}

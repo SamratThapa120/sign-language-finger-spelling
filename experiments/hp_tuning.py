@@ -2,19 +2,18 @@ import sys
 import os
 import glob
 import pandas as pd
-import optuna
 import json
-import yaml
+import optuna
 
 sys.path.append("./")
-
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-from signet.configs.ctc_loss_with_downsampled_tune import ctc_loss_encdec_params
-from signet.trainer.ctc_loss_downsampled_trainer import train_conv1d_mhsa_ctc_model
+from signet.configs.ctc_loss_with_downsampled_deploy_concataug import ctc_loss_encdec_params
+from signet.trainer.ctc_loss_downsampled_posemb_trainer import train_conv1d_mhsa_ctc_model
+import yaml
 
 data_root="../dataset/tdf_data"
-experiment_name=sys.argv[1]
+
 
 all_nan = json.load(open("../dataset/folds/allnan.json"))
 seq_length = json.load(open("../dataset/folds/seqlen.json"))
@@ -37,44 +36,38 @@ else:
     train_df["nonnullseq"] = train_df.files.apply(lambda x: handnonulllen[x.split(".")[0]])
     train_df.to_csv("../dataset/folds/cache_train.csv",index=False)
 
+train_files = train_df.files.apply(lambda x: os.path.join(data_root,x.replace(".npy",".tfrecords")))
 valid_files = valid_df.files.apply(lambda x: os.path.join(data_root,x.replace(".npy",".tfrecords")))
+train_df["tflabel"] = train_files
+
 def objective(trail: optuna.trial.Trial):
     CFG = ctc_loss_encdec_params() 
-    
-    CFG.rem_percent = trail.suggest_float("rem_percent",0.3,2)
-    mask = (train_df.nonnullseq*CFG.rem_percent)>train_df.labellen
-    train_files = train_df[mask].files.apply(lambda x: os.path.join(data_root,x.replace(".npy",".tfrecords")))
+    CFG.output_dir = '../runs/conv_trans_tuning'
+    CFG.train_epochs=60
+    CFG.epoch=120
+    if trail.number>0:
+        CFG.kernel_size = trail.suggest_int("kernel_size",2,20)
+        CFG.num_feature_blocks=trail.suggest_int("num_feature_blocks",1,15)
+        CFG.kernel_size_downsampling=trail.suggest_int("kernel_size_downsampling",3,16)
+        
+        CFG.blocks_dropout = trail.suggest_int("blocks_dropout",1,4)/10
+        CFG.final_dropout = trail.suggest_int("final_dropout",0,4)/10
+        CFG.dim = trail.suggest_categorical("dimension_2",[128,256,384,768])
+        CFG.use_conv = trail.suggest_categorical("use_convolution",[True,False])
+        CFG.use_transformer = not CFG.use_conv
 
-    CFG.lr = trail.suggest_float("lr",1e-5,1e-2,log=True)
-    CFG.weight_decay = trail.suggest_float("weight_decay",1e-6,1e-2,log=True)
-    CFG.kernel_size = trail.suggest_int("kernel_size",5,20)
-    CFG.num_feature_blocks=trail.suggest_int("num_feature_blocks",5,7)
-    
-    CFG.blocks_dropout = trail.suggest_int("blocks_dropout",1,5)/10
-    CFG.final_dropout = trail.suggest_int("final_dropout",1,5)/10
-
-    
-    CFG.attention_span=trail.suggest_int("attention_span",0,20)
-    do_downsample=trail.suggest_categorical("do_downsample", [True,False])
-    if do_downsample:
-        CFG.kernel_size_downsampling=trail.suggest_int("kernel_size_downsampling",3,17)
-        CFG.downsampling_strides=trail.suggest_int("downsampling_strides",2,CFG.kernel_size_downsampling)
-
-    CFG.loss_type=trail.suggest_categorical("loss_type", ["focal","ctc"]) 
-    if CFG.loss_type=="focal" :
-        CFG.alpha=trail.suggest_float("alpha",0.1,0.999)
-        CFG.gamma=trail.suggest_float("gamma",0,5)
-    # elif CFG.loss_type=="min_wer" :
-    #     CFG.beam_width=trail.suggest_categorical("beam_width",4,16)
-    #     print("beam_width:",CFG.beam_width)
+        if CFG.use_transformer:
+            divisors = [i for i in range(2,9) if CFG.dim % i == 0]  # get the divisors of CFG.dim from 2 to 10
+            if len(divisors) == 0:  # if no divisors are found, set the divisor to 2 as a default
+                divisors = [2]
+            CFG.num_heads = trail.suggest_categorical("num_heads", divisors)
     os.makedirs(os.path.join(CFG.output_dir,sys.argv[1]),exist_ok=True)
     with open(os.path.join(CFG.output_dir,sys.argv[1],"current_params.yaml"),"w") as f:
         yaml.dump(CFG.to_dict(), f, default_flow_style=False)
-
-    results = train_conv1d_mhsa_ctc_model(experiment_name,CFG,train_files, valid_files,hp_tuning=True,min_model_size=3000000,max_model_size=10000000)
+    results = train_conv1d_mhsa_ctc_model(sys.argv[1],CFG,train_files, valid_files,hp_tuning=True,min_model_size=2000000,max_model_size=10000000,train_df=train_df)
     if results==-99:
-        raise optuna.TrialPruned()
+        raise RuntimeError()
     return results
 
-study = optuna.create_study(direction="maximize", study_name='ctc_loss_tuning', storage='sqlite:///ctc_downsampled.db', load_if_exists=True)
-study.optimize(objective, n_trials=10000)
+study = optuna.create_study(direction="maximize", study_name='hptune_convtrans', storage='sqlite:///hptune_convtrans.db', load_if_exists=True)
+study.optimize(objective, n_trials=10000,catch=(RuntimeError))

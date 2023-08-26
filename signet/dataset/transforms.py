@@ -48,7 +48,7 @@ def flip_lr(x,CFG):
 @tf.function()
 def spatial_random_affine(xyz,
     scale  = (0.5,2),
-    shear = (-0.15,0.15),
+    shear = (-0.3,-0.3),
     shift  = (-0.5,0.5),
     degree = (-45,45),
 ):
@@ -95,6 +95,61 @@ def spatial_random_affine(xyz,
 
     return xyz
 
+@tf.function()
+def spatial_random_affine_perframe(xyz,
+    scale  = (0.5,2),
+    shear = (-0.3,-0.3),
+    shift  = (-0.5,0.5),
+    degree = (-45,45),
+):
+    seqlen = tf.shape(xyz)[0]
+    center = tf.constant([0.5,0.5])
+    if scale is not None:
+        scale = tf.random.uniform((seqlen,1,1),*scale)        
+        xyz = scale*xyz
+
+    if shear is not None:
+        xy = xyz[...,:2]
+        z = xyz[...,2:]
+        shear_x = tf.random.uniform((seqlen, 1, 1), *shear)
+        shear_y = tf.random.uniform((seqlen, 1, 1), *shear)
+        mask = tf.random.uniform((seqlen, 1, 1)) < 0.5
+        shear_x = tf.where(mask, shear_x, 0.)
+        shear_y = tf.where(mask, 0., shear_y)
+
+        ones = tf.ones_like(shear_x)
+        shear_mat = tf.reshape(tf.concat([
+            tf.concat([ones, shear_x], axis=2),
+            tf.concat([shear_y, ones], axis=2)
+        ], axis=1), [seqlen, 2, 2])
+
+        xy = tf.matmul(xy, shear_mat)
+        center = center + tf.stack([shear_y[..., 0], shear_x[..., 0]], axis=-1)
+        xyz = tf.concat([xy, z], axis=-1)    
+    if degree is not None:
+        xy = xyz[...,:2] - center
+        z = xyz[...,2:]
+  
+        degree = tf.random.uniform((seqlen, 1), *degree)
+        radian = degree / 180 * np.pi
+        c = tf.math.cos(radian)
+        s = tf.math.sin(radian)
+
+        rotate_mat = tf.reshape(tf.stack([
+            tf.stack([c, s], axis=-1),
+            tf.stack([-s, c], axis=-1)
+        ], axis=1), [seqlen, 2, 2])
+
+        xy = tf.matmul(xy, rotate_mat)
+        xy += center
+        xyz = tf.concat([xy, z], axis=-1)
+
+    if shift is not None:
+        shift = tf.random.uniform((seqlen, 1, 1), *shift)
+        xyz += shift
+
+    return xyz
+    
 def temporal_crop(x, length):
     l = tf.shape(x)[0]
     offset = tf.random.uniform((), 0, tf.clip_by_value(l-length,1,length), dtype=tf.int32)
@@ -131,6 +186,21 @@ def spatial_mask(x, erasable_landmarks, size=(0,1), mask_value=float('nan')):
     masked = tf.tensor_scatter_nd_update(x, indices, tf.where(mask, update, tf.gather_nd(x, indices)))
     return masked
 
+def scale_hands(x, left_hand,right_hand, scale=(0.5,2)):
+    scale_factor = tf.random.uniform((), *scale)
+    for hland,centerpoint in zip([left_hand,right_hand],[504,505]):
+        hands = tf.gather(x, hland, axis=1)
+        ref_point = tf.gather(x, [centerpoint], axis=1)
+        centered_hands = hands - ref_point
+        scaled_hands = centered_hands * scale_factor
+        scaled_hands += ref_point
+        frames = tf.shape(x)[0]
+        frames_indices = tf.range(frames)
+        hand_landmarks_indices = tf.constant(hland)
+        grid_frames, grid_landmarks = tf.meshgrid(frames_indices, hand_landmarks_indices, indexing='ij')
+        combined_indices = tf.stack([grid_frames, grid_landmarks], axis=-1)
+        x = tf.tensor_scatter_nd_update(x, tf.reshape(combined_indices, [-1, 2]), tf.reshape(scaled_hands, [-1, 3]))
+    return x
 
 
 def resample(x, rate=(0.8,1.2)):
@@ -161,12 +231,17 @@ def freeze_frames(x, maxlen):
 def augment_fn(x, tarlen,CFG):
     if tf.random.uniform(())<CFG.tempmask_probability:
         x = temporal_mask(x,tarlen,CFG.tempmask_range)
+    if tf.random.uniform(())<CFG.handonly_scale_probability:
+        x = scale_hands(x,CFG.LHAND,CFG.RHAND)
     if tf.random.uniform(())<CFG.freeze_probability:
         x = freeze_frames(x,CFG.max_len)
     if tf.random.uniform(())<CFG.flip_lr_probability:
         x = flip_lr(x,CFG)
     if tf.random.uniform(())<CFG.random_affine_probability:
-        x = spatial_random_affine(x)
+        if tf.random.uniform(())<CFG.perframe_random_affine_proportion:
+            x = spatial_random_affine_perframe(x)
+        else:
+            x = spatial_random_affine(x)
     if tf.random.uniform(())<CFG.erase_probability:
         x = spatial_mask(x,CFG.ERASABLE_LANDMARKS)
     return x

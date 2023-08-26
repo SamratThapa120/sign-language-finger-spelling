@@ -3,7 +3,7 @@ pandas==2.0.2
 joblib==1.2.0
 tqdm==4.65.0
 scikit-learn==1.2.0
-pyarrow==10.0.1.dev0+ga6eabc2b.d20230428
+pyarrow==10.0.1
 fastparquet==2023.4.0
 plotly==5.15.0
 python-Levenshtein==0.21.1
@@ -11,3 +11,4 @@ nltk==3.8.1
 tensorboard_plugin_profile==2.13.0
 tf-seq2seq-losses==0.2.0
 tflite-runtime==2.13.0
+optuna

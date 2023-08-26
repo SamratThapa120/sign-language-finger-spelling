@@ -7,7 +7,7 @@ import pandas as pd
 import tensorflow as tf
 import tensorflow_addons as tfa
 import tensorflow.keras.mixed_precision as mixed_precision
-
+import h5py
 
 from .tf_utils.schedules import OneCycleLR, ListedLR
 from .tf_utils.callbacks import Snapshot, SWA
@@ -108,7 +108,15 @@ def train_conv1d_mhsa_ctc_model(experiment_name,CFG,train_files, valid_files=Non
     
     if CFG.resume_path:
         print(f'resume from path {CFG.resume_path}')
-        model.load_weights(CFG.resume_path)
+        model.load_weights(CFG.resume_path,by_name=CFG.partial_load,skip_mismatch=CFG.partial_load)
+        if CFG.partial_load:
+            with h5py.File(CFG.resume_path, 'r') as f:
+                h5_layer_names = list(f.keys())
+            for layer in model.layers:
+                if layer.name in h5_layer_names:
+                    pass
+                else:
+                    print(f"Skipped layer: {layer.name}")
         if train_ds is not None:
             model.evaluate(train_ds.take(steps_per_epoch))
         if valid_ds is not None:
@@ -130,6 +138,7 @@ def train_conv1d_mhsa_ctc_model(experiment_name,CFG,train_files, valid_files=Non
         return levenshtein_cb.best_metric
     history = model.fit(
         train_ds,
+        initial_epoch=CFG.start_epoch,
         epochs=CFG.epoch,
         steps_per_epoch=steps_per_epoch,
         callbacks=callbacks,
